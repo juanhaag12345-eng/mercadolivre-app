@@ -6,6 +6,8 @@ import { SalesFilterBar } from "@/components/sales/SalesFilterBar";
 import { SalesTable } from "@/components/sales/SalesTable";
 import type { OrderStatus } from "@/db/schema";
 
+export const dynamic = "force-dynamic";
+
 export default async function VendasPage(props: PageProps<"/vendas">) {
   const searchParams = await props.searchParams;
   const productId = typeof searchParams.produto === "string" && searchParams.produto ? searchParams.produto : undefined;

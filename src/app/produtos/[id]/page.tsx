@@ -5,6 +5,8 @@ import { ProductForm } from "@/components/products/ProductForm";
 import { DeleteProductButton } from "@/components/products/DeleteProductButton";
 import { getProduct, updateProduct } from "@/actions/products";
 
+export const dynamic = "force-dynamic";
+
 export default async function EditarProdutoPage(props: PageProps<"/produtos/[id]">) {
   const { id } = await props.params;
   const product = await getProduct(id);

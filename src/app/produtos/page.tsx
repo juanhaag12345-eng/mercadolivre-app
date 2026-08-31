@@ -7,6 +7,8 @@ import { LinkButton } from "@/components/ui/Button";
 import { calculateFinancials, toNumber } from "@/lib/calculations";
 import { formatCurrency, formatPercent } from "@/lib/format";
 
+export const dynamic = "force-dynamic";
+
 export default async function ProdutosPage(props: PageProps<"/produtos">) {
   const searchParams = await props.searchParams;
   const q = typeof searchParams.q === "string" ? searchParams.q : undefined;
