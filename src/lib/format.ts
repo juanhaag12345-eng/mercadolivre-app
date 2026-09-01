@@ -27,11 +27,17 @@ export function formatDateLong(value: string | Date): string {
   }).format(date);
 }
 
+// Fuso horário do negócio (Brasília). Precisa ser fixo porque o servidor em
+// produção roda em UTC, então "hoje" calculado com o fuso local do processo
+// (getTimezoneOffset) ficava adiantado em relação ao dia real do usuário
+// entre ~21h e meia-noite no horário de Brasília — fazendo vendas recém
+// registradas "sumirem" do dashboard do mês por caírem no mês seguinte.
+const APP_TIME_ZONE = "America/Sao_Paulo";
+
 export function todayISO(): string {
-  const now = new Date();
-  const offset = now.getTimezoneOffset();
-  const local = new Date(now.getTime() - offset * 60 * 1000);
-  return local.toISOString().slice(0, 10);
+  // en-CA formata datas como AAAA-MM-DD, então isso já sai no formato ISO
+  // que o resto do app espera, sempre no fuso do negócio, não no do processo.
+  return new Intl.DateTimeFormat("en-CA", { timeZone: APP_TIME_ZONE }).format(new Date());
 }
 
 export function yearMonthOf(dateISO: string): string {
