@@ -77,6 +77,82 @@ export function Input({ className, error, onFocus, onMouseUp, ...props }: InputH
   );
 }
 
+function formatIntegerForEdit(value: number): string {
+  if (!Number.isFinite(value)) return "";
+  return String(Math.trunc(value));
+}
+
+/**
+ * Campo numérico inteiro (quantidade, unidades do kit etc.) sem as setinhas
+ * de incrementar/decrementar do `<input type="number">` nativo — no
+ * celular elas atrapalham mais do que ajudam, e a pessoa só quer digitar o
+ * número do jeito que for mais fácil. Usa o mesmo mecanismo de
+ * "selecionar tudo ao focar" do `Input`.
+ */
+export function IntegerInput({
+  name,
+  value,
+  onValueChange,
+  min = 1,
+  className,
+  error,
+  ...props
+}: {
+  name?: string;
+  value: number;
+  onValueChange: (value: number) => void;
+  min?: number;
+  className?: string;
+  error?: string;
+} & Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "name" | "type" | "min">) {
+  const [text, setText] = useState(() => formatIntegerForEdit(value));
+  const focusedRef = useRef(false);
+  const selectAll = useSelectAllOnFocus();
+
+  useEffect(() => {
+    if (!focusedRef.current) setText(formatIntegerForEdit(value));
+  }, [value]);
+
+  function handleChange(e: ChangeEvent<HTMLInputElement>) {
+    const raw = e.target.value.replace(/\D/g, "");
+    setText(raw);
+    const parsed = raw === "" ? NaN : parseInt(raw, 10);
+    onValueChange(Number.isFinite(parsed) ? parsed : 0);
+  }
+
+  return (
+    <div>
+      <input
+        type="text"
+        inputMode="numeric"
+        pattern="[0-9]*"
+        autoComplete="off"
+        value={text}
+        onChange={handleChange}
+        onFocus={(e) => {
+          focusedRef.current = true;
+          selectAll.handleFocus(e);
+        }}
+        onMouseUp={selectAll.handleMouseUp}
+        onBlur={() => {
+          focusedRef.current = false;
+          const clamped = Number.isFinite(value) && value >= min ? value : min;
+          if (clamped !== value) onValueChange(clamped);
+          setText(formatIntegerForEdit(clamped));
+        }}
+        className={cn(
+          "h-10 w-full rounded-xl border bg-surface px-3 text-sm text-foreground placeholder:text-muted transition-colors focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent",
+          error ? "border-danger" : "border-border",
+          className
+        )}
+        {...props}
+      />
+      {name && <input type="hidden" name={name} value={Number.isFinite(value) && value >= min ? value : min} />}
+      {error && <p className="mt-1 text-xs text-danger">{error}</p>}
+    </div>
+  );
+}
+
 // Converte um número para texto editável usando vírgula (padrão brasileiro),
 // sem casas decimais forçadas — 35.9 vira "35,9", 0 vira "0".
 function formatDecimalForEdit(value: number): string {

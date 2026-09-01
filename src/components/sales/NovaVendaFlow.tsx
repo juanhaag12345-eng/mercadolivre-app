@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { Input, Label, MoneyInput, Select, Textarea } from "@/components/ui/Field";
+import { Input, IntegerInput, Label, MoneyInput, Select, Textarea } from "@/components/ui/Field";
 import { searchActiveProducts } from "@/actions/products";
 import { createSale } from "@/actions/sales";
 import { calculateFinancials, toNumber } from "@/lib/calculations";
@@ -190,13 +190,11 @@ function SaleStep({ product, onBack }: { product: Product; onBack: () => void })
             </div>
             <div>
               <Label>Quantidade vendida</Label>
-              <Input
-                type="number"
+              <IntegerInput
                 name="quantity"
                 min={1}
-                step={1}
                 value={quantity}
-                onChange={(e) => setQuantity(Number(e.target.value) || 1)}
+                onValueChange={setQuantity}
                 error={errors.quantity}
               />
             </div>

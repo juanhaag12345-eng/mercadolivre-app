@@ -4,7 +4,7 @@ import { useActionState, useMemo, useState, type ReactNode } from "react";
 import { useFormStatus } from "react-dom";
 import { Info, Loader2, Package } from "lucide-react";
 import { Card } from "@/components/ui/Card";
-import { Input, Label, MoneyInput, PercentInput, Select, Toggle } from "@/components/ui/Field";
+import { Input, IntegerInput, Label, MoneyInput, PercentInput, Select, Toggle } from "@/components/ui/Field";
 import { Button } from "@/components/ui/Button";
 import { calculateFinancials, toNumber } from "@/lib/calculations";
 import { formatCurrency, formatPercent } from "@/lib/format";
@@ -100,13 +100,11 @@ export function ProductForm({
           {isKit && (
             <div className="mt-4 max-w-[200px]">
               <Label>Quantas unidades tem o kit?</Label>
-              <Input
+              <IntegerInput
                 name="kitQuantity"
-                type="number"
                 min={1}
-                step={1}
                 value={kitQuantity}
-                onChange={(e) => setKitQuantity(Number(e.target.value) || 1)}
+                onValueChange={setKitQuantity}
                 error={errors.kitQuantity}
               />
             </div>
