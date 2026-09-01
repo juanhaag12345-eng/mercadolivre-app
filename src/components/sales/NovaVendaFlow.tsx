@@ -236,7 +236,7 @@ function SaleStep({ product, onBack }: { product: Product; onBack: () => void })
                 <MoneyInput
                   name="unitPriceOverride"
                   value={unitPrice}
-                  onChange={(e) => setUnitPrice(Number(e.target.value) || 0)}
+                  onValueChange={setUnitPrice}
                 />
               </div>
               <div>
@@ -244,7 +244,7 @@ function SaleStep({ product, onBack }: { product: Product; onBack: () => void })
                 <MoneyInput
                   name="shippingCostOverride"
                   value={shippingCost}
-                  onChange={(e) => setShippingCost(Number(e.target.value) || 0)}
+                  onValueChange={setShippingCost}
                 />
               </div>
               <div>
@@ -252,7 +252,7 @@ function SaleStep({ product, onBack }: { product: Product; onBack: () => void })
                 <MoneyInput
                   name="packagingCostOverride"
                   value={packagingCost}
-                  onChange={(e) => setPackagingCost(Number(e.target.value) || 0)}
+                  onValueChange={setPackagingCost}
                 />
               </div>
               <div>
@@ -260,7 +260,7 @@ function SaleStep({ product, onBack }: { product: Product; onBack: () => void })
                 <MoneyInput
                   name="productCostOverride"
                   value={productCost}
-                  onChange={(e) => setProductCost(Number(e.target.value) || 0)}
+                  onValueChange={setProductCost}
                 />
               </div>
             </div>

@@ -51,7 +51,7 @@ export function GoalCard({
           <MoneyInput
             autoFocus
             value={value}
-            onChange={(e) => setValue(Number(e.target.value) || 0)}
+            onValueChange={setValue}
             className="h-11"
           />
           <Button

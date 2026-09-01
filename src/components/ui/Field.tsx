@@ -1,5 +1,17 @@
+"use client";
+
 import { cn } from "@/lib/utils";
-import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FocusEvent,
+  type InputHTMLAttributes,
+  type ReactNode,
+  type SelectHTMLAttributes,
+  type TextareaHTMLAttributes,
+} from "react";
 
 export function Label({ children, hint }: { children: ReactNode; hint?: string }) {
   return (
@@ -10,10 +22,21 @@ export function Label({ children, hint }: { children: ReactNode; hint?: string }
   );
 }
 
-export function Input({ className, error, ...props }: InputHTMLAttributes<HTMLInputElement> & { error?: string }) {
+// Ao focar, seleciona o conteúdo inteiro do campo — assim, ao começar a
+// digitar, o valor antigo (o "0" que já vem preenchido, por exemplo) é
+// substituído de uma vez, sem precisar apagar na mão primeiro.
+function selectAllOnFocus(e: FocusEvent<HTMLInputElement>) {
+  e.target.select();
+}
+
+export function Input({ className, error, onFocus, ...props }: InputHTMLAttributes<HTMLInputElement> & { error?: string }) {
   return (
     <div>
       <input
+        onFocus={(e) => {
+          selectAllOnFocus(e);
+          onFocus?.(e);
+        }}
         className={cn(
           "h-10 w-full rounded-xl border bg-surface px-3 text-sm text-foreground placeholder:text-muted transition-colors focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent",
           error ? "border-danger" : "border-border",
@@ -21,6 +44,95 @@ export function Input({ className, error, ...props }: InputHTMLAttributes<HTMLIn
         )}
         {...props}
       />
+      {error && <p className="mt-1 text-xs text-danger">{error}</p>}
+    </div>
+  );
+}
+
+// Converte um número para texto editável usando vírgula (padrão brasileiro),
+// sem casas decimais forçadas — 35.9 vira "35,9", 0 vira "0".
+function formatDecimalForEdit(value: number): string {
+  if (!Number.isFinite(value)) return "0";
+  const rounded = Math.round(value * 100) / 100;
+  return rounded.toString().replace(".", ",");
+}
+
+/**
+ * Campo numérico decimal amigável ao padrão brasileiro: aceita vírgula OU
+ * ponto como separador decimal, e seleciona tudo ao focar para substituir o
+ * "0" inicial com um único toque de tecla.
+ *
+ * Usa `<input type="text" inputMode="decimal">` em vez de `type="number"`
+ * porque o input nativo `number` simplesmente ignora o caractere "," — é
+ * por isso que não dava pra digitar vírgula nos campos de valor.
+ *
+ * O valor de fato enviado no formulário vai por um input escondido, sempre
+ * com ponto decimal (formato que o `z.coerce.number()` no servidor espera).
+ */
+export function DecimalInput({
+  name,
+  value,
+  onValueChange,
+  className,
+  error,
+  allowNegative = false,
+  ...props
+}: {
+  name?: string;
+  value: number;
+  onValueChange: (value: number) => void;
+  className?: string;
+  error?: string;
+  allowNegative?: boolean;
+} & Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "name" | "type">) {
+  const [text, setText] = useState(() => formatDecimalForEdit(value));
+  const focusedRef = useRef(false);
+
+  // Só re-sincroniza o texto exibido com o valor externo quando o campo NÃO
+  // está sendo editado agora (ex: trocou de produto no formulário) — assim
+  // não atropela o que a pessoa está digitando no meio da vírgula.
+  useEffect(() => {
+    if (!focusedRef.current) setText(formatDecimalForEdit(value));
+  }, [value]);
+
+  function handleChange(e: ChangeEvent<HTMLInputElement>) {
+    let raw = e.target.value.replace(/[^\d.,-]/g, "");
+    if (!allowNegative) raw = raw.replace(/-/g, "");
+
+    const firstSep = raw.search(/[.,]/);
+    if (firstSep !== -1) {
+      raw = raw.slice(0, firstSep + 1) + raw.slice(firstSep + 1).replace(/[.,]/g, "");
+    }
+
+    setText(raw);
+    const parsed = parseFloat(raw.replace(",", "."));
+    onValueChange(Number.isFinite(parsed) ? parsed : 0);
+  }
+
+  return (
+    <div>
+      <input
+        type="text"
+        inputMode="decimal"
+        autoComplete="off"
+        value={text}
+        onChange={handleChange}
+        onFocus={(e) => {
+          focusedRef.current = true;
+          selectAllOnFocus(e);
+        }}
+        onBlur={() => {
+          focusedRef.current = false;
+          setText(formatDecimalForEdit(value));
+        }}
+        className={cn(
+          "h-10 w-full rounded-xl border bg-surface px-3 text-sm text-foreground placeholder:text-muted transition-colors focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent",
+          error ? "border-danger" : "border-border",
+          className
+        )}
+        {...props}
+      />
+      {name && <input type="hidden" name={name} value={Number.isFinite(value) ? value : 0} />}
       {error && <p className="mt-1 text-xs text-danger">{error}</p>}
     </div>
   );
@@ -60,13 +172,64 @@ export function Select({ className, error, children, ...props }: SelectHTMLAttri
   );
 }
 
-export function MoneyInput(props: InputHTMLAttributes<HTMLInputElement> & { error?: string }) {
+export function MoneyInput({
+  name,
+  value,
+  onValueChange,
+  error,
+  className,
+  ...props
+}: {
+  name?: string;
+  value: number;
+  onValueChange: (value: number) => void;
+  error?: string;
+  className?: string;
+} & Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "name" | "type">) {
   return (
     <div className="relative">
       <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted">
         R$
       </span>
-      <Input type="number" step="0.01" min="0" inputMode="decimal" {...props} className={cn("pl-9", props.className)} />
+      <DecimalInput
+        name={name}
+        value={value}
+        onValueChange={onValueChange}
+        error={error}
+        className={cn("pl-9", className)}
+        {...props}
+      />
+    </div>
+  );
+}
+
+export function PercentInput({
+  name,
+  value,
+  onValueChange,
+  error,
+  className,
+  ...props
+}: {
+  name?: string;
+  value: number;
+  onValueChange: (value: number) => void;
+  error?: string;
+  className?: string;
+} & Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "name" | "type">) {
+  return (
+    <div className="relative">
+      <DecimalInput
+        name={name}
+        value={value}
+        onValueChange={onValueChange}
+        error={error}
+        className={cn("pr-8", className)}
+        {...props}
+      />
+      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted">
+        %
+      </span>
     </div>
   );
 }

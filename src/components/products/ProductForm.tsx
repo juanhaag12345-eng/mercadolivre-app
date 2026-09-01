@@ -4,7 +4,7 @@ import { useActionState, useMemo, useState, type ReactNode } from "react";
 import { useFormStatus } from "react-dom";
 import { Info, Loader2, Package } from "lucide-react";
 import { Card } from "@/components/ui/Card";
-import { Input, Label, MoneyInput, Select, Toggle } from "@/components/ui/Field";
+import { Input, Label, MoneyInput, PercentInput, Select, Toggle } from "@/components/ui/Field";
 import { Button } from "@/components/ui/Button";
 import { calculateFinancials, toNumber } from "@/lib/calculations";
 import { formatCurrency, formatPercent } from "@/lib/format";
@@ -120,7 +120,7 @@ export function ProductForm({
             <MoneyInput
               name="unitPrice"
               value={unitPrice}
-              onChange={(e) => setUnitPrice(Number(e.target.value) || 0)}
+              onValueChange={setUnitPrice}
               error={errors.unitPrice}
               required
             />
@@ -149,26 +149,17 @@ export function ProductForm({
             <div>
               <Label>{saleFeeType === "percentual" ? "Percentual" : "Valor"}</Label>
               {saleFeeType === "percentual" ? (
-                <div className="relative">
-                  <Input
-                    name="saleFeeValue"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={saleFeeValue}
-                    onChange={(e) => setSaleFeeValue(Number(e.target.value) || 0)}
-                    error={errors.saleFeeValue}
-                    className="pr-8"
-                  />
-                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted">
-                    %
-                  </span>
-                </div>
+                <PercentInput
+                  name="saleFeeValue"
+                  value={saleFeeValue}
+                  onValueChange={setSaleFeeValue}
+                  error={errors.saleFeeValue}
+                />
               ) : (
                 <MoneyInput
                   name="saleFeeValue"
                   value={saleFeeValue}
-                  onChange={(e) => setSaleFeeValue(Number(e.target.value) || 0)}
+                  onValueChange={setSaleFeeValue}
                   error={errors.saleFeeValue}
                 />
               )}
@@ -190,7 +181,7 @@ export function ProductForm({
             <MoneyInput
               name="shippingCost"
               value={shippingCost}
-              onChange={(e) => setShippingCost(Number(e.target.value) || 0)}
+              onValueChange={setShippingCost}
               error={errors.shippingCost}
             />
           </div>
@@ -204,7 +195,7 @@ export function ProductForm({
               <MoneyInput
                 name="packagingCost"
                 value={packagingCost}
-                onChange={(e) => setPackagingCost(Number(e.target.value) || 0)}
+                onValueChange={setPackagingCost}
                 error={errors.packagingCost}
               />
             </div>
@@ -213,7 +204,7 @@ export function ProductForm({
               <MoneyInput
                 name="productCost"
                 value={productCost}
-                onChange={(e) => setProductCost(Number(e.target.value) || 0)}
+                onValueChange={setProductCost}
                 error={errors.productCost}
               />
             </div>
