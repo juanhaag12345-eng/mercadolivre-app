@@ -8,6 +8,7 @@ import {
   type ChangeEvent,
   type FocusEvent,
   type InputHTMLAttributes,
+  type MouseEvent,
   type ReactNode,
   type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
@@ -22,20 +23,47 @@ export function Label({ children, hint }: { children: ReactNode; hint?: string }
   );
 }
 
-// Ao focar, seleciona o conteúdo inteiro do campo — assim, ao começar a
-// digitar, o valor antigo (o "0" que já vem preenchido, por exemplo) é
-// substituído de uma vez, sem precisar apagar na mão primeiro.
-function selectAllOnFocus(e: FocusEvent<HTMLInputElement>) {
-  e.target.select();
+/**
+ * Seleciona todo o conteúdo do campo assim que ele ganha foco — inclusive
+ * ao focar com um clique do mouse, não só com Tab.
+ *
+ * Só chamar `.select()` no onFocus não basta: quando o foco vem de um
+ * clique, o próprio mouseup desse clique roda DEPOIS do focus e o
+ * navegador usa ele pra posicionar o cursor no ponto clicado, desfazendo a
+ * seleção que acabamos de fazer. Por isso cancelamos esse primeiro mouseup
+ * (só ele — cliques seguintes, com o campo já focado, voltam a posicionar
+ * o cursor normalmente, permitindo editar um ponto específico do texto).
+ * Era por causa disso que dava pra ver o "0"/"1" selecionado por uma
+ * fração de segundo e, na hora de digitar, ele continuava lá.
+ */
+function useSelectAllOnFocus() {
+  const justFocusedRef = useRef(false);
+  return {
+    handleFocus(e: FocusEvent<HTMLInputElement>) {
+      justFocusedRef.current = true;
+      e.target.select();
+    },
+    handleMouseUp(e: MouseEvent<HTMLInputElement>) {
+      if (justFocusedRef.current) {
+        justFocusedRef.current = false;
+        e.preventDefault();
+      }
+    },
+  };
 }
 
-export function Input({ className, error, onFocus, ...props }: InputHTMLAttributes<HTMLInputElement> & { error?: string }) {
+export function Input({ className, error, onFocus, onMouseUp, ...props }: InputHTMLAttributes<HTMLInputElement> & { error?: string }) {
+  const selectAll = useSelectAllOnFocus();
   return (
     <div>
       <input
         onFocus={(e) => {
-          selectAllOnFocus(e);
+          selectAll.handleFocus(e);
           onFocus?.(e);
+        }}
+        onMouseUp={(e) => {
+          selectAll.handleMouseUp(e);
+          onMouseUp?.(e);
         }}
         className={cn(
           "h-10 w-full rounded-xl border bg-surface px-3 text-sm text-foreground placeholder:text-muted transition-colors focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent",
@@ -87,6 +115,7 @@ export function DecimalInput({
 } & Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "name" | "type">) {
   const [text, setText] = useState(() => formatDecimalForEdit(value));
   const focusedRef = useRef(false);
+  const selectAll = useSelectAllOnFocus();
 
   // Só re-sincroniza o texto exibido com o valor externo quando o campo NÃO
   // está sendo editado agora (ex: trocou de produto no formulário) — assim
@@ -119,8 +148,9 @@ export function DecimalInput({
         onChange={handleChange}
         onFocus={(e) => {
           focusedRef.current = true;
-          selectAllOnFocus(e);
+          selectAll.handleFocus(e);
         }}
+        onMouseUp={selectAll.handleMouseUp}
         onBlur={() => {
           focusedRef.current = false;
           setText(formatDecimalForEdit(value));
