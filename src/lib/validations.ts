@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ORDER_STATUSES, SALE_FEE_TYPES } from "@/db/schema";
+import { DISPATCHERS, ORDER_STATUSES, SALE_FEE_TYPES } from "@/db/schema";
 
 export const productSchema = z.object({
   name: z.string().trim().min(2, "Informe o nome do produto"),
@@ -23,6 +23,7 @@ export const saleSchema = z.object({
   quantity: z.coerce.number().int().min(1, "Mínimo 1"),
   saleDate: z.string().min(1, "Informe a data"),
   orderStatus: z.enum(ORDER_STATUSES),
+  dispatchedBy: z.enum(DISPATCHERS, { message: "Selecione quem despachou" }),
   notes: z.string().trim().optional().or(z.literal("")),
   // Overrides opcionais — se vazios, usamos o valor cadastrado do produto
   unitPriceOverride: z.coerce.number().min(0).optional(),
@@ -36,4 +37,9 @@ export type SaleFormValues = z.infer<typeof saleSchema>;
 export const goalSchema = z.object({
   yearMonth: z.string().regex(/^\d{4}-\d{2}$/),
   goalValue: z.coerce.number().min(0),
+});
+
+export const settingsSchema = z.object({
+  operationalFeePercent: z.coerce.number().min(0).max(100),
+  reservePercent: z.coerce.number().min(0).max(100),
 });

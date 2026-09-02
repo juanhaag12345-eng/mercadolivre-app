@@ -2,7 +2,9 @@ import Link from "next/link";
 import { ArrowRight, Clock, DollarSign, Percent, ShoppingBag, Truck } from "lucide-react";
 import { getSalesForRange } from "@/actions/sales";
 import { getMonthlyGoal } from "@/actions/goals";
+import { getSettings } from "@/actions/settings";
 import { GoalCard } from "@/components/dashboard/GoalCard";
+import { PartnerSplitCard } from "@/components/dashboard/PartnerSplitCard";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { RevenueChart, type DailyPoint } from "@/components/dashboard/RevenueChart";
 import { TopProducts, type TopProductRow } from "@/components/dashboard/TopProducts";
@@ -19,10 +21,11 @@ export default async function DashboardPage() {
   const { from, to } = monthRange(yearMonth);
   const { from: prevFrom, to: prevTo } = monthRange(prevYearMonth);
 
-  const [goal, currentSales, previousSales] = await Promise.all([
+  const [goal, currentSales, previousSales, partnerSettings] = await Promise.all([
     getMonthlyGoal(yearMonth),
     getSalesForRange(from, to),
     getSalesForRange(prevFrom, prevTo),
+    getSettings(),
   ]);
 
   const totals = currentSales.reduce(
@@ -30,10 +33,13 @@ export default async function DashboardPage() {
       acc.revenue += s.revenue;
       acc.profit += s.profit;
       acc.quantity += s.quantity;
+      acc.reserveAmount += s.reserveAmount;
+      acc.juanTotal += s.juanTotal;
+      acc.djowTotal += s.djowTotal;
       if (s.orderStatus === "pendente") acc.pending += 1;
       return acc;
     },
-    { revenue: 0, profit: 0, quantity: 0, pending: 0 }
+    { revenue: 0, profit: 0, quantity: 0, pending: 0, reserveAmount: 0, juanTotal: 0, djowTotal: 0 }
   );
   const avgMargin = totals.revenue > 0 ? (totals.profit / totals.revenue) * 100 : 0;
 
@@ -94,6 +100,15 @@ export default async function DashboardPage() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div className="md:col-span-2 md:row-span-2">
           <GoalCard yearMonth={yearMonth} goal={goal} revenue={totals.revenue} />
+        </div>
+        <div className="md:col-span-2 md:row-span-2">
+          <PartnerSplitCard
+            reserveAmount={totals.reserveAmount}
+            juanTotal={totals.juanTotal}
+            djowTotal={totals.djowTotal}
+            operationalFeePercent={partnerSettings.operationalFeePercent}
+            reservePercent={partnerSettings.reservePercent}
+          />
         </div>
         <StatCard
           label="Faturamento do mês"

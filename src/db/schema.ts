@@ -18,6 +18,14 @@ export type SaleFeeType = (typeof SALE_FEE_TYPES)[number];
 export const ORDER_STATUSES = ["pendente", "despachado"] as const;
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
+// Quem despachou a venda (sócios responsáveis pela operação)
+export const DISPATCHERS = ["juan", "djow"] as const;
+export type Dispatcher = (typeof DISPATCHERS)[number];
+export const DISPATCHER_LABELS: Record<Dispatcher, string> = {
+  juan: "Juan",
+  djow: "Djow",
+};
+
 export const products = pgTable(
   "products",
   {
@@ -87,6 +95,28 @@ export const sales = pgTable(
 
     notes: text("notes"),
 
+    // Sócio responsável por despachar essa venda
+    dispatchedBy: text("dispatched_by", { enum: DISPATCHERS })
+      .notNull()
+      .default("juan"),
+
+    // --- Snapshot da divisão de lucro vigente no momento da venda ---
+    // Guardamos os percentuais usados (e não só o valor calculado) para que
+    // alterar as configurações depois não mude retroativamente a divisão de
+    // vendas já registradas — mesmo raciocínio do snapshot financeiro abaixo.
+    operationalFeePercentSnapshot: numeric("operational_fee_percent_snapshot", {
+      precision: 5,
+      scale: 2,
+    })
+      .notNull()
+      .default("5"),
+    reservePercentSnapshot: numeric("reserve_percent_snapshot", {
+      precision: 5,
+      scale: 2,
+    })
+      .notNull()
+      .default("30"),
+
     // --- Snapshot dos valores financeiros do produto no momento da venda ---
     // Isso garante que editar o cadastro do produto depois não altere o
     // lucro/margem de vendas já registradas.
@@ -145,8 +175,29 @@ export const monthlyGoals = pgTable("monthly_goals", {
     .defaultNow(),
 });
 
+// Configurações gerais da divisão de lucro entre os sócios (linha única,
+// id fixo "default"). A reserva da empresa e a remuneração operacional de
+// quem despacha são sempre um percentual configurável; a divisão do que
+// sobra entre os dois sócios é sempre 50/50.
+export const settings = pgTable("settings", {
+  id: text("id").primaryKey().default("default"),
+  operationalFeePercent: numeric("operational_fee_percent", {
+    precision: 5,
+    scale: 2,
+  })
+    .notNull()
+    .default("5"),
+  reservePercent: numeric("reserve_percent", { precision: 5, scale: 2 })
+    .notNull()
+    .default("30"),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export type Product = typeof products.$inferSelect;
 export type NewProduct = typeof products.$inferInsert;
 export type Sale = typeof sales.$inferSelect;
 export type NewSale = typeof sales.$inferInsert;
 export type MonthlyGoal = typeof monthlyGoals.$inferSelect;
+export type AppSettings = typeof settings.$inferSelect;

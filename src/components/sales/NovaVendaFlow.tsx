@@ -19,7 +19,7 @@ import { searchActiveProducts } from "@/actions/products";
 import { createSale } from "@/actions/sales";
 import { calculateFinancials, toNumber } from "@/lib/calculations";
 import { formatCurrency, formatPercent, todayISO } from "@/lib/format";
-import { ORDER_STATUSES, type Product } from "@/db/schema";
+import { DISPATCHER_LABELS, DISPATCHERS, ORDER_STATUSES, type Product } from "@/db/schema";
 import type { ActionResult } from "@/actions/products";
 
 export function NovaVendaFlow() {
@@ -199,15 +199,30 @@ function SaleStep({ product, onBack }: { product: Product; onBack: () => void })
               />
             </div>
           </div>
-          <div className="mt-4">
-            <Label>Status do pedido</Label>
-            <Select name="orderStatus" defaultValue="pendente" error={errors.orderStatus}>
-              {ORDER_STATUSES.map((status) => (
-                <option key={status} value={status}>
-                  {status === "pendente" ? "Pendente" : "Despachado"}
+          <div className="mt-4 grid grid-cols-2 gap-4">
+            <div>
+              <Label>Status do pedido</Label>
+              <Select name="orderStatus" defaultValue="pendente" error={errors.orderStatus}>
+                {ORDER_STATUSES.map((status) => (
+                  <option key={status} value={status}>
+                    {status === "pendente" ? "Pendente" : "Despachado"}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <Label hint="quem executou a venda">Quem despachou?</Label>
+              <Select name="dispatchedBy" defaultValue="" error={errors.dispatchedBy} required>
+                <option value="" disabled>
+                  Selecione...
                 </option>
-              ))}
-            </Select>
+                {DISPATCHERS.map((dispatcher) => (
+                  <option key={dispatcher} value={dispatcher}>
+                    {DISPATCHER_LABELS[dispatcher]}
+                  </option>
+                ))}
+              </Select>
+            </div>
           </div>
           <div className="mt-4">
             <Label hint="opcional">Observações</Label>

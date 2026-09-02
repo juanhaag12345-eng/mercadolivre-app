@@ -8,6 +8,7 @@ import { products, sales, type OrderStatus } from "@/db/schema";
 import { saleSchema } from "@/lib/validations";
 import { toNumber } from "@/lib/calculations";
 import { withFinancials } from "@/lib/sale-financials";
+import { getSettings } from "@/actions/settings";
 import type { ActionResult } from "@/actions/products";
 
 export interface SalesFilter {
@@ -48,6 +49,7 @@ function parseSaleForm(formData: FormData) {
     quantity: Number(formData.get("quantity") ?? 1),
     saleDate: String(formData.get("saleDate") ?? ""),
     orderStatus: String(formData.get("orderStatus") ?? "pendente"),
+    dispatchedBy: String(formData.get("dispatchedBy") ?? ""),
     notes: String(formData.get("notes") ?? ""),
     unitPriceOverride: emptyToUndefined(formData.get("unitPriceOverride")),
     shippingCostOverride: emptyToUndefined(formData.get("shippingCostOverride")),
@@ -86,6 +88,7 @@ export async function createSale(
   }
 
   const values = parsed.data;
+  const partnerSettings = await getSettings();
 
   await db.insert(sales).values({
     productId: product.id,
@@ -93,6 +96,9 @@ export async function createSale(
     quantity: values.quantity,
     saleDate: values.saleDate,
     orderStatus: values.orderStatus,
+    dispatchedBy: values.dispatchedBy,
+    operationalFeePercentSnapshot: partnerSettings.operationalFeePercent.toString(),
+    reservePercentSnapshot: partnerSettings.reservePercent.toString(),
     notes: values.notes || null,
     unitPriceSnapshot: (values.unitPriceOverride ?? toNumber(product.unitPrice)).toString(),
     kitQuantitySnapshot: product.kitQuantity,

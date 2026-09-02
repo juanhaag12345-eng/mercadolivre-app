@@ -1,5 +1,5 @@
 import type { sales } from "@/db/schema";
-import { calculateFinancials, toNumber } from "@/lib/calculations";
+import { calculateFinancials, computePartnerSplit, toNumber } from "@/lib/calculations";
 
 export function withFinancials(sale: typeof sales.$inferSelect) {
   const breakdown = calculateFinancials({
@@ -12,7 +12,14 @@ export function withFinancials(sale: typeof sales.$inferSelect) {
     productCost: toNumber(sale.productCostSnapshot),
     quantity: sale.quantity,
   });
-  return { ...sale, ...breakdown };
+  const partnerSplit = computePartnerSplit({
+    profit: breakdown.profit,
+    revenue: breakdown.revenue,
+    operationalFeePercent: toNumber(sale.operationalFeePercentSnapshot),
+    reservePercent: toNumber(sale.reservePercentSnapshot),
+    dispatchedBy: sale.dispatchedBy,
+  });
+  return { ...sale, ...breakdown, ...partnerSplit };
 }
 
 export type SaleWithFinancials = ReturnType<typeof withFinancials>;
