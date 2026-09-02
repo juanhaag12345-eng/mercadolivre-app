@@ -27,10 +27,17 @@ export function GoalCard({
   return (
     <Card className="relative overflow-hidden">
       <div className="flex items-start justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand text-neutral-900">
-            <Target size={16} />
-          </span>
+        <div className="flex items-center gap-3">
+          <div
+            className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full transition-[background] duration-700"
+            style={{
+              background: `conic-gradient(var(--brand) ${goal > 0 ? percent * 3.6 : 0}deg, var(--surface-muted) 0deg)`,
+            }}
+          >
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-surface">
+              <Target size={15} className="text-brand-dark" />
+            </span>
+          </div>
           <div>
             <p className="text-sm font-semibold">Meta de faturamento</p>
             <p className="text-xs text-muted">{monthLabel(yearMonth)}</p>
