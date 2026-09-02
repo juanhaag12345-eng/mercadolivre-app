@@ -68,22 +68,22 @@ export function calculateFinancials(inputs: FinancialInputs): FinancialBreakdown
 }
 
 export interface PartnerSplitInputs {
-  // Lucro da venda ANTES da remuneração operacional (o "profit" de calculateFinancials)
+  // Lucro da venda (o "profit" de calculateFinancials)
   profit: number;
   revenue: number;
   // % da receita pago a quem despachou, pela execução + custo operacional
+  // (pago À PARTE, não é descontado do lucro antes da reserva)
   operationalFeePercent: number;
-  // % do lucro (já descontada a remuneração operacional) que fica de reserva na empresa
+  // % do lucro da venda que fica de reserva na empresa
   reservePercent: number;
   dispatchedBy: Dispatcher;
 }
 
 export interface PartnerSplitBreakdown {
+  // Remuneração operacional: paga à parte, direto pra quem despachou
   operationalFee: number;
-  // Lucro da venda depois de descontar a remuneração operacional
-  profitAfterOperational: number;
   reserveAmount: number;
-  // O que sobra pra dividir 50/50 entre os sócios
+  // O que sobra do lucro (depois da reserva) pra dividir 50/50 entre os sócios
   distributableAmount: number;
   // Metade do distribuível — vai igual pros dois, independente de quem despachou
   partnerShare: number;
@@ -95,14 +95,14 @@ export interface PartnerSplitBreakdown {
 
 /**
  * Divide o lucro de uma venda entre reserva da empresa e os dois sócios,
- * seguindo o fluxo: receita → lucro da venda → (- remuneração operacional
- * de quem despachou) → (- reserva da empresa) → resto dividido 50/50.
+ * seguindo o fluxo: lucro da venda → reserva da empresa (% direto sobre o
+ * lucro) → resto dividido 50/50 entre os sócios. A remuneração operacional
+ * é um pagamento à parte (% da receita), somado ao total de quem despachou.
  */
 export function computePartnerSplit(inputs: PartnerSplitInputs): PartnerSplitBreakdown {
   const operationalFee = inputs.revenue * (inputs.operationalFeePercent / 100);
-  const profitAfterOperational = inputs.profit - operationalFee;
-  const reserveAmount = profitAfterOperational * (inputs.reservePercent / 100);
-  const distributableAmount = profitAfterOperational - reserveAmount;
+  const reserveAmount = inputs.profit * (inputs.reservePercent / 100);
+  const distributableAmount = inputs.profit - reserveAmount;
   const partnerShare = distributableAmount / 2;
 
   const juanTotal = partnerShare + (inputs.dispatchedBy === "juan" ? operationalFee : 0);
@@ -110,7 +110,6 @@ export function computePartnerSplit(inputs: PartnerSplitInputs): PartnerSplitBre
 
   return {
     operationalFee,
-    profitAfterOperational,
     reserveAmount,
     distributableAmount,
     partnerShare,
