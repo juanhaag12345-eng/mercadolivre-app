@@ -98,7 +98,7 @@ export function PartnerSplitCard({
       ) : (
         <div className="space-y-3">
           <div className="rounded-xl bg-surface-muted px-3 py-2.5">
-            <p className="text-xs text-muted">Reserva da empresa ({reservePercent}% do lucro após remuneração operacional)</p>
+            <p className="text-xs text-muted">Reserva da empresa ({reservePercent}% do lucro da venda)</p>
             <p className="text-lg font-bold">{formatCurrency(reserveAmount)}</p>
           </div>
           <div className="grid grid-cols-2 gap-3">
