@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { ArrowRight, BadgePercent, Clock, CreditCard, DollarSign, Percent, PieChart, Receipt, ShoppingBag, Truck } from "lucide-react";
+import { ArrowRight, Clock, CreditCard, DollarSign, Percent, Receipt, ShoppingBag, Truck } from "lucide-react";
 import { getSalesForRange } from "@/actions/sales";
 import { getMonthlyGoal } from "@/actions/goals";
 import { getSettings } from "@/actions/settings";
 import { listProducts } from "@/actions/products";
 import { DashboardFilterBar } from "@/components/dashboard/DashboardFilterBar";
+import { FeeCard } from "@/components/dashboard/FeeCard";
 import { GoalCard } from "@/components/dashboard/GoalCard";
 import { PartnerSplitCard } from "@/components/dashboard/PartnerSplitCard";
 import { StatCard } from "@/components/dashboard/StatCard";
@@ -209,10 +210,22 @@ export default async function DashboardPage(props: PageProps<"/">) {
         />
         <StatCard label="Margem média" value={formatPercent(avgMargin)} icon={Percent} />
         <StatCard label="Pedidos pendentes" value={String(totals.pending)} icon={Truck} tone={totals.pending > 0 ? "danger" : "neutral"} />
-        <StatCard label="Taxa de envio total" value={formatCurrency(totals.shippingTotal)} icon={Receipt} />
-        <StatCard label="Taxa de envio (% média do faturamento)" value={formatPercent(avgShippingPercent)} icon={PieChart} />
-        <StatCard label="Taxa de venda total" value={formatCurrency(totals.saleFeeTotal)} icon={CreditCard} />
-        <StatCard label="Taxa de venda (% média do faturamento)" value={formatPercent(avgSaleFeePercent)} icon={BadgePercent} />
+        <div className="md:col-span-2">
+          <FeeCard
+            label="Taxa de envio"
+            icon={Receipt}
+            totalValue={formatCurrency(totals.shippingTotal)}
+            percentValue={formatPercent(avgShippingPercent)}
+          />
+        </div>
+        <div className="md:col-span-2">
+          <FeeCard
+            label="Taxa de venda"
+            icon={CreditCard}
+            totalValue={formatCurrency(totals.saleFeeTotal)}
+            percentValue={formatPercent(avgSaleFeePercent)}
+          />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
