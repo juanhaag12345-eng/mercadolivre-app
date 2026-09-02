@@ -116,8 +116,8 @@ export function PartnerSplitCard({
             </div>
           </div>
           <p className="text-xs text-muted">
-            Remuneração operacional de {operationalFeePercent}% vai inteira para quem despachou; o restante do lucro é
-            sempre dividido 50/50 entre os dois sócios.
+            Remuneração operacional de {operationalFeePercent}% do lucro vai inteira para quem despachou; o restante
+            é dividido 50/50 entre os dois sócios. Reserva + Juan + Djow fecha no lucro da venda.
           </p>
         </div>
       )}

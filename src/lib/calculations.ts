@@ -68,11 +68,12 @@ export function calculateFinancials(inputs: FinancialInputs): FinancialBreakdown
 }
 
 export interface PartnerSplitInputs {
-  // Lucro da venda (o "profit" de calculateFinancials)
+  // Lucro da venda (o "profit" de calculateFinancials) — base de TODOS os
+  // percentuais abaixo (reserva e remuneração operacional).
   profit: number;
   revenue: number;
-  // % da receita pago a quem despachou, pela execução + custo operacional
-  // (pago À PARTE, não é descontado do lucro antes da reserva)
+  // % do lucro pago a quem despachou, pela execução da venda. Sai do valor
+  // distribuível (não é somado por fora nem tirado da reserva).
   operationalFeePercent: number;
   // % do lucro da venda que fica de reserva na empresa
   reservePercent: number;
@@ -80,29 +81,32 @@ export interface PartnerSplitInputs {
 }
 
 export interface PartnerSplitBreakdown {
-  // Remuneração operacional: paga à parte, direto pra quem despachou
+  // Remuneração operacional: sai do valor distribuível, inteira pra quem despachou
   operationalFee: number;
   reserveAmount: number;
-  // O que sobra do lucro (depois da reserva) pra dividir 50/50 entre os sócios
+  // O que sobra pra dividir 50/50 entre os sócios, já descontada a reserva
+  // e a remuneração operacional
   distributableAmount: number;
   // Metade do distribuível — vai igual pros dois, independente de quem despachou
   partnerShare: number;
   // Quanto cada sócio embolsa NESSA venda: metade do distribuível + a
-  // remuneração operacional inteira, só para quem despachou
+  // remuneração operacional inteira, só para quem despachou.
+  // reserveAmount + juanTotal + djowTotal fecha exatamente no lucro da venda.
   juanTotal: number;
   djowTotal: number;
 }
 
 /**
- * Divide o lucro de uma venda entre reserva da empresa e os dois sócios,
- * seguindo o fluxo: lucro da venda → reserva da empresa (% direto sobre o
- * lucro) → resto dividido 50/50 entre os sócios. A remuneração operacional
- * é um pagamento à parte (% da receita), somado ao total de quem despachou.
+ * Divide o lucro de uma venda entre reserva da empresa e os dois sócios.
+ * Reserva e remuneração operacional são sempre % do lucro da venda (nunca
+ * da receita): reserva = lucro × reservePercent; remuneração operacional =
+ * lucro × operationalFeePercent, paga inteira a quem despachou; o restante
+ * é dividido 50/50 entre os sócios. A soma das três partes fecha no lucro.
  */
 export function computePartnerSplit(inputs: PartnerSplitInputs): PartnerSplitBreakdown {
-  const operationalFee = inputs.revenue * (inputs.operationalFeePercent / 100);
   const reserveAmount = inputs.profit * (inputs.reservePercent / 100);
-  const distributableAmount = inputs.profit - reserveAmount;
+  const operationalFee = inputs.profit * (inputs.operationalFeePercent / 100);
+  const distributableAmount = inputs.profit - reserveAmount - operationalFee;
   const partnerShare = distributableAmount / 2;
 
   const juanTotal = partnerShare + (inputs.dispatchedBy === "juan" ? operationalFee : 0);
