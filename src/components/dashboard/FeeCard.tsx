@@ -27,7 +27,7 @@ export function FeeCard({
         </div>
         <div className="text-right">
           <p className="text-2xl font-bold leading-tight">{percentValue}</p>
-          <p className="text-xs text-muted mt-1">% média do faturamento</p>
+          <p className="text-xs text-muted mt-1">% taxa média</p>
         </div>
       </div>
     </Card>
