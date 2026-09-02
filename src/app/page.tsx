@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Clock, DollarSign, Percent, PieChart, Receipt, ShoppingBag, Truck } from "lucide-react";
+import { ArrowRight, BadgePercent, Clock, CreditCard, DollarSign, Percent, PieChart, Receipt, ShoppingBag, Truck } from "lucide-react";
 import { getSalesForRange } from "@/actions/sales";
 import { getMonthlyGoal } from "@/actions/goals";
 import { getSettings } from "@/actions/settings";
@@ -55,16 +55,20 @@ export default async function DashboardPage(props: PageProps<"/">) {
       acc.juanTotal += s.juanTotal;
       acc.djowTotal += s.djowTotal;
       acc.shippingTotal += s.shippingTotal;
+      acc.saleFeeTotal += s.saleFeeAmount;
       if (s.orderStatus === "pendente") acc.pending += 1;
       return acc;
     },
-    { revenue: 0, profit: 0, quantity: 0, pending: 0, reserveAmount: 0, juanTotal: 0, djowTotal: 0, shippingTotal: 0 }
+    { revenue: 0, profit: 0, quantity: 0, pending: 0, reserveAmount: 0, juanTotal: 0, djowTotal: 0, shippingTotal: 0, saleFeeTotal: 0 }
   );
   const avgMargin = totals.revenue > 0 ? (totals.profit / totals.revenue) * 100 : 0;
   // Taxa de envio: valor total pago em frete no período e quanto isso
   // representa, em média, sobre o faturamento (peso pela receita de cada
   // venda — a mesma lógica usada na margem média acima).
   const avgShippingPercent = totals.revenue > 0 ? (totals.shippingTotal / totals.revenue) * 100 : 0;
+  // Taxa de venda: comissão total do marketplace no período e quanto isso
+  // representa, em média, sobre o faturamento.
+  const avgSaleFeePercent = totals.revenue > 0 ? (totals.saleFeeTotal / totals.revenue) * 100 : 0;
   const goalMonthRevenue = goalMonthSales.reduce((sum, s) => sum + s.revenue, 0);
 
   const prevTotals = previousSales.reduce(
@@ -207,6 +211,8 @@ export default async function DashboardPage(props: PageProps<"/">) {
         <StatCard label="Pedidos pendentes" value={String(totals.pending)} icon={Truck} tone={totals.pending > 0 ? "danger" : "neutral"} />
         <StatCard label="Taxa de envio total" value={formatCurrency(totals.shippingTotal)} icon={Receipt} />
         <StatCard label="Taxa de envio (% média do faturamento)" value={formatPercent(avgShippingPercent)} icon={PieChart} />
+        <StatCard label="Taxa de venda total" value={formatCurrency(totals.saleFeeTotal)} icon={CreditCard} />
+        <StatCard label="Taxa de venda (% média do faturamento)" value={formatPercent(avgSaleFeePercent)} icon={BadgePercent} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
