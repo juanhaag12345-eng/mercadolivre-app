@@ -134,11 +134,16 @@ export async function getSale(id: string) {
 
 // ---- Agregações para o dashboard ----
 
-export async function getSalesForRange(from: string, to: string) {
+export async function getSalesForRange(from?: string, to?: string, productId?: string) {
+  const conditions = [];
+  if (from) conditions.push(gte(sales.saleDate, from));
+  if (to) conditions.push(lte(sales.saleDate, to));
+  if (productId) conditions.push(eq(sales.productId, productId));
+
   const rows = await db
     .select()
     .from(sales)
-    .where(and(gte(sales.saleDate, from), lte(sales.saleDate, to)))
+    .where(conditions.length ? and(...conditions) : undefined)
     .orderBy(asc(sales.saleDate));
   return rows.map(withFinancials);
 }

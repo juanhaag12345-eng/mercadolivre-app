@@ -1,12 +1,13 @@
 import { Trophy } from "lucide-react";
 import { Card } from "@/components/ui/Card";
-import { formatCurrency } from "@/lib/format";
+import { formatCurrency, formatPercent } from "@/lib/format";
 
 export interface TopProductRow {
   name: string;
   revenue: number;
   profit: number;
   quantity: number;
+  shippingTotal: number;
 }
 
 export function TopProducts({ rows }: { rows: TopProductRow[] }) {
@@ -40,7 +41,8 @@ export function TopProducts({ rows }: { rows: TopProductRow[] }) {
                 />
               </div>
               <p className="text-xs text-muted mt-1">
-                {row.quantity} {row.quantity === 1 ? "venda" : "vendas"} · lucro {formatCurrency(row.profit)}
+                {row.quantity} {row.quantity === 1 ? "venda" : "vendas"} · lucro {formatCurrency(row.profit)} · frete{" "}
+                {formatCurrency(row.shippingTotal)} ({formatPercent(row.revenue > 0 ? (row.shippingTotal / row.revenue) * 100 : 0, 1)})
               </p>
             </div>
           ))}
