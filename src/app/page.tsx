@@ -14,7 +14,7 @@ import { TopProducts, type TopProductRow } from "@/components/dashboard/TopProdu
 import { Card } from "@/components/ui/Card";
 import { LinkButton } from "@/components/ui/Button";
 import { formatCurrency, formatDate, formatPercent, currentYearMonth } from "@/lib/format";
-import { daysBetweenInclusive, isoRangeDays, isoRangeMonths, monthRange, percentChange, previousPeriod } from "@/lib/dates";
+import { daysBetweenInclusive, isoRangeDays, isoRangeMonths, monthRange, percentChange, previousPeriod, previousYearMonth } from "@/lib/dates";
 import { resolveDashboardPeriod, type PeriodKey } from "@/lib/dashboard-period";
 
 export const dynamic = "force-dynamic";
@@ -30,10 +30,13 @@ export default async function DashboardPage(props: PageProps<"/">) {
 
   const { periodo, from, to } = resolveDashboardPeriod({ periodo: periodoParam, de: deParam, ate: ateParam });
 
-  // A meta de faturamento é sempre do mês-calendário real, independente do
-  // filtro de período/produto escolhido — não faria sentido comparar "meta
-  // do mês" com uma janela arbitrária como "últimos 7 dias".
-  const yearMonth = currentYearMonth();
+  // A meta de faturamento acompanha o filtro de período quando ele
+  // corresponde a um mês-calendário inteiro ("Este mês"/"Mês passado"), já
+  // que cada mês tem sua própria meta cadastrada. Para janelas arbitrárias
+  // (últimos 7 dias, este ano, tudo, personalizado) não existe uma meta
+  // única que faça sentido, então caímos de volta no mês atual.
+  const yearMonth =
+    periodo === "mes-passado" ? previousYearMonth(currentYearMonth()) : currentYearMonth();
   const { from: goalFrom, to: goalTo } = monthRange(yearMonth);
 
   const prevPeriod = from && to ? previousPeriod(from, to) : null;
