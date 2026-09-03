@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Package, ShoppingBag } from "lucide-react";
+import { Boxes, LayoutDashboard, Package, ShoppingBag } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const links = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/vendas", label: "Vendas", icon: ShoppingBag },
   { href: "/produtos", label: "Produtos", icon: Package },
+  { href: "/custo-fornecimento", label: "Custo Fornecimento", icon: Boxes },
 ];
 
 export function SidebarNav() {
