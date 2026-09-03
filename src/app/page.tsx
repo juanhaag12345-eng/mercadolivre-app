@@ -144,6 +144,7 @@ export default async function DashboardPage(props: PageProps<"/">) {
   for (const sale of currentSales) {
     const row = byProduct.get(sale.productNameSnapshot) ?? {
       name: sale.productNameSnapshot,
+      internalCode: sale.productInternalCode,
       revenue: 0,
       profit: 0,
       quantity: 0,
@@ -258,7 +259,12 @@ export default async function DashboardPage(props: PageProps<"/">) {
             {recent.map((sale) => (
               <div key={sale.id} className="flex items-center justify-between py-2.5 text-sm">
                 <div className="min-w-0">
-                  <p className="font-medium truncate">{sale.productNameSnapshot}</p>
+                  <p className="font-medium truncate">
+                    {sale.productInternalCode !== null && (
+                      <span className="text-muted font-mono">#{sale.productInternalCode} </span>
+                    )}
+                    {sale.productNameSnapshot}
+                  </p>
                   <p className="text-xs text-muted">{formatDate(sale.saleDate)}</p>
                 </div>
                 <div className="text-right shrink-0 ml-3">

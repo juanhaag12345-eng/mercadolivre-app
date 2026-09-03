@@ -18,6 +18,15 @@ export interface SalesFilter {
   status?: OrderStatus;
 }
 
+// Junta o código interno atual do produto (quando ele ainda existe) a cada
+// venda — não é um snapshot, é só pra exibir "#N" junto do nome em telas de
+// histórico, ajudando a diferenciar produtos com nomes parecidos.
+function withProductCode(row: { sale: typeof sales.$inferSelect; productInternalCode: number | null }) {
+  return { ...withFinancials(row.sale), productInternalCode: row.productInternalCode };
+}
+
+export type SaleListRow = ReturnType<typeof withProductCode>;
+
 export async function listSales(filter: SalesFilter = {}) {
   const conditions = [];
   if (filter.productId) conditions.push(eq(sales.productId, filter.productId));
@@ -26,21 +35,23 @@ export async function listSales(filter: SalesFilter = {}) {
   if (filter.status) conditions.push(eq(sales.orderStatus, filter.status));
 
   const rows = await db
-    .select()
+    .select({ sale: sales, productInternalCode: products.internalCode })
     .from(sales)
+    .leftJoin(products, eq(sales.productId, products.id))
     .where(conditions.length ? and(...conditions) : undefined)
     .orderBy(desc(sales.saleDate), desc(sales.createdAt));
 
-  return rows.map(withFinancials);
+  return rows.map(withProductCode);
 }
 
 export async function listRecentSales(limit = 8) {
   const rows = await db
-    .select()
+    .select({ sale: sales, productInternalCode: products.internalCode })
     .from(sales)
+    .leftJoin(products, eq(sales.productId, products.id))
     .orderBy(desc(sales.saleDate), desc(sales.createdAt))
     .limit(limit);
-  return rows.map(withFinancials);
+  return rows.map(withProductCode);
 }
 
 function parseSaleForm(formData: FormData) {
@@ -141,11 +152,12 @@ export async function getSalesForRange(from?: string, to?: string, productId?: s
   if (productId) conditions.push(eq(sales.productId, productId));
 
   const rows = await db
-    .select()
+    .select({ sale: sales, productInternalCode: products.internalCode })
     .from(sales)
+    .leftJoin(products, eq(sales.productId, products.id))
     .where(conditions.length ? and(...conditions) : undefined)
     .orderBy(asc(sales.saleDate));
-  return rows.map(withFinancials);
+  return rows.map(withProductCode);
 }
 
 export async function getProductNamesForFilter() {

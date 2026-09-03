@@ -39,6 +39,7 @@ export function SupplyCostTable({ rows }: { rows: SupplyCostRow[] }) {
               <tr key={row.id} className="border-b border-border last:border-0 hover:bg-surface-muted/40">
                 <td className="px-5 py-3 font-medium max-w-[260px]">
                   <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs text-muted shrink-0">#{row.internalCode}</span>
                     <span className="truncate">{row.name}</span>
                     {row.isKit && (
                       <Badge tone="accent" className="shrink-0">

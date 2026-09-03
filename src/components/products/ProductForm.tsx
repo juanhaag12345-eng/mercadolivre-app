@@ -6,6 +6,7 @@ import { Info, Loader2, Package } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Input, IntegerInput, Label, MoneyInput, PercentInput, Select, Toggle } from "@/components/ui/Field";
 import { Button } from "@/components/ui/Button";
+import { SimilarProductsHint } from "@/components/products/SimilarProductsHint";
 import { calculateFinancials, toNumber } from "@/lib/calculations";
 import { formatCurrency, formatPercent } from "@/lib/format";
 import type { Product } from "@/db/schema";
@@ -17,14 +18,19 @@ export function ProductForm({
   product,
   action,
   deleteSlot,
+  nextInternalCode,
 }: {
   product?: Product;
   action: Action;
   deleteSlot?: ReactNode;
+  // Só usado ao cadastrar um produto novo, como prévia do código que ele vai
+  // receber (o valor real é atribuído pelo banco no momento do insert).
+  nextInternalCode?: number;
 }) {
   const [state, formAction] = useActionState<ActionResult | null, FormData>(action, null);
   const errors = state && !state.ok ? state.errors : {};
 
+  const [name, setName] = useState(product?.name ?? "");
   const [isKit, setIsKit] = useState(product?.isKit ?? false);
   const [kitQuantity, setKitQuantity] = useState(product?.kitQuantity ?? 1);
   const [unitPrice, setUnitPrice] = useState(toNumber(product?.unitPrice) || 0);
@@ -59,9 +65,14 @@ export function ProductForm({
     <form action={formAction} className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-6">
       <div className="space-y-6">
         <Card>
-          <div className="flex items-center gap-2 mb-4">
-            <Package size={18} className="text-muted" />
-            <h2 className="font-semibold">Informações do produto</h2>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Package size={18} className="text-muted" />
+              <h2 className="font-semibold">Informações do produto</h2>
+            </div>
+            <span className="rounded-full bg-surface-muted px-2.5 py-1 text-xs font-mono font-semibold text-muted">
+              Código #{product ? product.internalCode : nextInternalCode}
+            </span>
           </div>
           <div className="space-y-4">
             <div>
@@ -69,10 +80,12 @@ export function ProductForm({
               <Input
                 name="name"
                 placeholder='Ex: Nutella 650g ou "Kit com 3 unidades de Nutella 650g"'
-                defaultValue={product?.name}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
                 error={errors.name}
                 required
               />
+              <SimilarProductsHint name={name} excludeId={product?.id} />
             </div>
             <div>
               <Label hint="opcional">URL da imagem</Label>

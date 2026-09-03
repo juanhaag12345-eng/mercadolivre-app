@@ -19,7 +19,10 @@ export default async function EditarProdutoPage(props: PageProps<"/produtos/[id]
       <Link href="/produtos" className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-foreground mb-4">
         <ArrowLeft size={16} /> Voltar para produtos
       </Link>
-      <h1 className="text-2xl font-bold mb-1">{product.name}</h1>
+      <h1 className="text-2xl font-bold mb-1">
+        <span className="text-muted font-mono mr-1.5">#{product.internalCode}</span>
+        {product.name}
+      </h1>
       <p className="text-sm text-muted mb-6">Editar cadastro do produto.</p>
       <ProductForm
         product={product}

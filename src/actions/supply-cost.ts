@@ -7,6 +7,7 @@ import { toNumber } from "@/lib/calculations";
 
 export interface SupplyCostRow {
   id: string;
+  internalCode: number;
   name: string;
   active: boolean;
   isKit: boolean;
@@ -57,6 +58,7 @@ export async function getSupplyCostData(search?: string) {
     const spend = spendByProduct.get(p.id) ?? { totalSpent: 0, unitsSold: 0 };
     return {
       id: p.id,
+      internalCode: p.internalCode,
       name: p.name,
       active: p.active,
       isKit: p.isKit,

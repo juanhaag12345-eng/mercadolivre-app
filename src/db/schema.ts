@@ -8,6 +8,7 @@ import {
   timestamp,
   date,
   index,
+  serial,
 } from "drizzle-orm/pg-core";
 
 // Tipos de taxa de venda: percentual (sobre o valor da venda) ou valor fixo
@@ -30,6 +31,12 @@ export const products = pgTable(
   "products",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    // Código interno sequencial (1, 2, 3...), na ordem em que os produtos
+    // foram cadastrados. Não muda se o produto for editado ou renomeado —
+    // serve para identificar o item de forma inequívoca em qualquer lugar
+    // do site, mesmo quando nomes são parecidos (ex: duas variações de
+    // "Nutella 650g").
+    internalCode: serial("internal_code").notNull().unique(),
     name: text("name").notNull(),
     imageUrl: text("image_url"),
 

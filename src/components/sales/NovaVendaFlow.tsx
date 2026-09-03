@@ -99,7 +99,9 @@ function ProductStep({ onSelect }: { onSelect: (p: Product) => void }) {
                     <Package size={18} className="text-muted" />
                   </span>
                   <div className="min-w-0">
-                    <p className="font-semibold text-sm truncate">{product.name}</p>
+                    <p className="font-semibold text-sm truncate">
+                      <span className="text-muted font-mono">#{product.internalCode}</span> {product.name}
+                    </p>
                     <p className="text-xs text-muted">
                       {formatCurrency(toNumber(product.unitPrice) * product.kitQuantity)} · margem{" "}
                       {formatPercent(breakdown.marginPercent)}
@@ -171,7 +173,9 @@ function SaleStep({ product, onBack }: { product: Product; onBack: () => void })
           <Package size={20} className="text-muted" />
         </span>
         <div className="min-w-0">
-          <p className="font-semibold truncate">{product.name}</p>
+          <p className="font-semibold truncate">
+            <span className="text-muted font-mono">#{product.internalCode}</span> {product.name}
+          </p>
           <p className="text-xs text-muted">
             {product.isKit ? `Kit com ${product.kitQuantity} unidades · ` : ""}
             {formatCurrency(toNumber(product.unitPrice) * product.kitQuantity)}

@@ -2,9 +2,9 @@ import { PackageSearch } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { SaleStatusSelect, DeleteSaleButton } from "@/components/sales/SaleRowActions";
 import { formatCurrency, formatDate, formatPercent } from "@/lib/format";
-import type { SaleWithFinancials } from "@/lib/sale-financials";
+import type { SaleListRow } from "@/actions/sales";
 
-export function SalesTable({ sales }: { sales: SaleWithFinancials[] }) {
+export function SalesTable({ sales }: { sales: SaleListRow[] }) {
   if (sales.length === 0) {
     return (
       <Card className="flex flex-col items-center justify-center py-14 text-center">
@@ -54,7 +54,12 @@ export function SalesTable({ sales }: { sales: SaleWithFinancials[] }) {
           <tbody>
             {sales.map((sale) => (
               <tr key={sale.id} className="border-b border-border last:border-0 hover:bg-surface-muted/40">
-                <td className="px-5 py-3 font-medium max-w-[220px] truncate">{sale.productNameSnapshot}</td>
+                <td className="px-5 py-3 font-medium max-w-[220px] truncate">
+                  {sale.productInternalCode !== null && (
+                    <span className="text-muted font-mono">#{sale.productInternalCode} </span>
+                  )}
+                  {sale.productNameSnapshot}
+                </td>
                 <td className="px-3 py-3 text-muted whitespace-nowrap">{formatDate(sale.saleDate)}</td>
                 <td className="px-3 py-3 text-muted">{sale.quantity}</td>
                 <td className="px-3 py-3 whitespace-nowrap">{formatCurrency(sale.revenue)}</td>

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { and, asc, eq, ilike, ne } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { products } from "@/db/schema";
 import { productSchema, type ProductFormValues } from "@/lib/validations";
@@ -33,6 +33,50 @@ export async function searchActiveProducts(query: string) {
 export async function getProduct(id: string) {
   const rows = await db.select().from(products).where(eq(products.id, id)).limit(1);
   return rows[0] ?? null;
+}
+
+/**
+ * Próximo código interno a ser atribuído (só para exibir uma prévia no
+ * formulário de cadastro — o valor real vem do banco via sequence no
+ * momento do insert, então dois cadastros simultâneos nunca colidem).
+ */
+export async function getNextInternalCodePreview() {
+  const rows = await db
+    .select({ internalCode: products.internalCode })
+    .from(products)
+    .orderBy(desc(products.internalCode))
+    .limit(1);
+  return (rows[0]?.internalCode ?? 0) + 1;
+}
+
+/**
+ * Produtos com nome parecido (contém o texto digitado, em qualquer ordem
+ * de cadastro), usado para sugerir itens já existentes enquanto a pessoa
+ * digita o nome de um produto novo — evita cadastrar duplicado sem perceber.
+ */
+export async function findSimilarProducts(query: string, excludeId?: string) {
+  const trimmed = query.trim();
+  if (trimmed.length < 3) return [];
+
+  const rows = await db
+    .select({
+      id: products.id,
+      internalCode: products.internalCode,
+      name: products.name,
+      isKit: products.isKit,
+      kitQuantity: products.kitQuantity,
+      active: products.active,
+    })
+    .from(products)
+    .where(
+      excludeId
+        ? and(ilike(products.name, `%${trimmed}%`), ne(products.id, excludeId))
+        : ilike(products.name, `%${trimmed}%`)
+    )
+    .orderBy(asc(products.name))
+    .limit(5);
+
+  return rows;
 }
 
 export type ActionResult =
@@ -84,6 +128,13 @@ export async function createProduct(
     return { ok: false, errors: flattenErrors(parsed.error) };
   }
 
+  if (await duplicateProductNameExists(parsed.data.name)) {
+    return {
+      ok: false,
+      errors: { name: "Já existe um produto cadastrado com esse nome exato. Edite o produto existente ou escolha outro nome." },
+    };
+  }
+
   const [created] = await db
     .insert(products)
     .values(toDbValues(parsed.data))
@@ -103,6 +154,13 @@ export async function updateProduct(
   const parsed = productSchema.safeParse(raw);
   if (!parsed.success) {
     return { ok: false, errors: flattenErrors(parsed.error) };
+  }
+
+  if (await duplicateProductNameExists(parsed.data.name, id)) {
+    return {
+      ok: false,
+      errors: { name: "Já existe outro produto cadastrado com esse nome exato. Escolha outro nome." },
+    };
   }
 
   await db.update(products).set(toDbValues(parsed.data)).where(eq(products.id, id));

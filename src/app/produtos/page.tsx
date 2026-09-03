@@ -87,6 +87,9 @@ export default async function ProdutosPage(props: PageProps<"/produtos">) {
                   </div>
 
                   <div className="flex flex-wrap gap-1.5 mb-3">
+                    <Badge tone="neutral" className="font-mono">
+                      #{product.internalCode}
+                    </Badge>
                     {product.isKit && <Badge tone="accent">Kit x{product.kitQuantity}</Badge>}
                     {product.freeShipping && <Badge tone="neutral">Frete grátis</Badge>}
                   </div>

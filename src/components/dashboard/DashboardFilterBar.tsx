@@ -57,7 +57,7 @@ export function DashboardFilterBar({
             <option value="">Todos os produtos</option>
             {products.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.name}
+                #{p.internalCode} — {p.name}
               </option>
             ))}
           </Select>

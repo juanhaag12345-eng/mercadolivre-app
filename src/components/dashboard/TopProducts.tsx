@@ -4,6 +4,7 @@ import { formatCurrency, formatPercent } from "@/lib/format";
 
 export interface TopProductRow {
   name: string;
+  internalCode: number | null;
   revenue: number;
   profit: number;
   quantity: number;
@@ -30,6 +31,7 @@ export function TopProducts({ rows }: { rows: TopProductRow[] }) {
                   <span className="flex h-5 w-5 items-center justify-center rounded-full bg-surface-muted text-[11px] font-bold text-muted">
                     {i + 1}
                   </span>
+                  {row.internalCode !== null && <span className="text-muted font-mono">#{row.internalCode}</span>}
                   {row.name}
                 </span>
                 <span className="font-semibold whitespace-nowrap ml-2">{formatCurrency(row.revenue)}</span>
