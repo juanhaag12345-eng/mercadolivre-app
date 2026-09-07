@@ -29,6 +29,13 @@
       "when": 1788812942566,
       "tag": "0003_thankful_dragon_man",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788817332415,
+      "tag": "0004_shocking_cable",
+      "breakpoints": true
     }
   ]
 }

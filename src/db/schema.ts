@@ -9,6 +9,8 @@ import {
   date,
   index,
   serial,
+  jsonb,
+  unique,
 } from "drizzle-orm/pg-core";
 
 // Tipos de taxa de venda: percentual (sobre o valor da venda) ou valor fixo
@@ -216,9 +218,92 @@ export const settings = pgTable("settings", {
     .defaultNow(),
 });
 
+// --- Integração com o Mercado Livre ---
+
+// Credenciais OAuth da conta vendedora conectada (linha única, id fixo
+// "default"). O access_token dura ~6h; guardamos o refresh_token (que é
+// rotativo — a cada uso o Mercado Livre devolve um novo) para renovar
+// automaticamente sem precisar que alguém logue de novo.
+export const mercadolivreCredentials = pgTable("mercadolivre_credentials", {
+  id: text("id").primaryKey().default("default"),
+  mlUserId: text("ml_user_id").notNull(),
+  accessToken: text("access_token").notNull(),
+  refreshToken: text("refresh_token").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  scope: text("scope"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+// Status de uma venda importada do Mercado Livre, aguardando revisão manual
+// antes de virar uma venda "de verdade" no sistema.
+export const PENDING_SALE_STATUSES = ["pendente", "confirmada", "ignorada"] as const;
+export type PendingSaleStatus = (typeof PENDING_SALE_STATUSES)[number];
+
+// Vendas pendentes de entrada: um item de um pedido do Mercado Livre,
+// recebido via webhook (tópico orders_v2), aguardando que alguém confirme
+// qual produto interno corresponde e quem despachou antes de entrar de fato
+// no dashboard. Guardamos uma linha por ITEM do pedido (não por pedido),
+// porque um mesmo pedido pode ter itens diferentes que mapeiam para
+// produtos internos diferentes.
+export const pendingSales = pgTable(
+  "pending_sales",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+
+    mlOrderId: text("ml_order_id").notNull(),
+    mlOrderItemId: text("ml_order_item_id").notNull(),
+
+    // Dados do pedido no momento em que recebemos/consultamos — apenas para
+    // exibição na tela de revisão, não afetam o cálculo financeiro (que usa
+    // sempre os dados cadastrados do produto interno escolhido).
+    titleSnapshot: text("title_snapshot").notNull(),
+    quantity: integer("quantity").notNull().default(1),
+    unitPriceSnapshot: numeric("unit_price_snapshot", { precision: 12, scale: 2 }).notNull(),
+    orderDate: timestamp("order_date", { withTimezone: true }).notNull(),
+    orderStatusMl: text("order_status_ml").notNull(),
+    buyerNickname: text("buyer_nickname"),
+    rawOrderPayload: jsonb("raw_order_payload"),
+
+    status: text("status", { enum: PENDING_SALE_STATUSES }).notNull().default("pendente"),
+
+    // Preenchidos pela pessoa na hora de confirmar a entrada da venda.
+    matchedProductId: uuid("matched_product_id").references(() => products.id, {
+      onDelete: "set null",
+    }),
+    dispatchedBy: text("dispatched_by", { enum: DISPATCHERS }),
+
+    // Venda real criada no momento da confirmação (referência só para
+    // rastreabilidade — a venda em si vive só na tabela `sales`).
+    resultingSaleId: uuid("resulting_sale_id").references(() => sales.id, {
+      onDelete: "set null",
+    }),
+
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // Evita duplicar o mesmo item de pedido se o webhook do ML entregar a
+    // mesma notificação mais de uma vez (ele avisa que isso pode acontecer).
+    unique("pending_sales_order_item_unique").on(table.mlOrderId, table.mlOrderItemId),
+    index("pending_sales_status_idx").on(table.status),
+  ]
+);
+
 export type Product = typeof products.$inferSelect;
 export type NewProduct = typeof products.$inferInsert;
 export type Sale = typeof sales.$inferSelect;
 export type NewSale = typeof sales.$inferInsert;
 export type MonthlyGoal = typeof monthlyGoals.$inferSelect;
 export type AppSettings = typeof settings.$inferSelect;
+export type MercadolivreCredentials = typeof mercadolivreCredentials.$inferSelect;
+export type PendingSale = typeof pendingSales.$inferSelect;
+export type NewPendingSale = typeof pendingSales.$inferInsert;
