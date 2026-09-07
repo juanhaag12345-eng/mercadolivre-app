@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { exchangeAuthorizationCode } from "@/lib/mercadolivre";
+import { exchangeAuthorizationCode, SITE_ORIGIN } from "@/lib/mercadolivre";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +15,10 @@ export async function GET(request: NextRequest) {
   const expectedState = request.cookies.get("ml_oauth_state")?.value;
 
   const redirectTo = (path: string) => {
-    const response = NextResponse.redirect(new URL(path, request.url));
+    // Monta a URL a partir de SITE_ORIGIN (domínio público conhecido), não de
+    // request.url — atrás do proxy do Railway request.url pode vir com host
+    // "localhost:8080", o que quebraria o redirect no navegador do usuário.
+    const response = NextResponse.redirect(new URL(path, SITE_ORIGIN));
     response.cookies.delete("ml_oauth_state");
     return response;
   };

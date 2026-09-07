@@ -12,6 +12,13 @@ export const ML_REDIRECT_URI =
   process.env.MERCADOLIVRE_REDIRECT_URI ??
   "https://web2-production-22bd.up.railway.app/api/mercadolivre/callback";
 
+// Origem pública do site, usada para montar redirects absolutos com
+// segurança. Não usamos o host da requisição recebida (request.url) porque,
+// atrás do proxy do Railway, ele pode chegar como "localhost:8080" em vez do
+// domínio público — o que faria o navegador do usuário tentar abrir
+// localhost depois do login do Mercado Livre.
+export const SITE_ORIGIN = new URL(ML_REDIRECT_URI).origin;
+
 function getClientCredentials() {
   const clientId = process.env.MERCADOLIVRE_CLIENT_ID;
   const clientSecret = process.env.MERCADOLIVRE_CLIENT_SECRET;
