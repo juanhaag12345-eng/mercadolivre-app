@@ -1,0 +1,2 @@
+ALTER TABLE "sales" ADD COLUMN "donation_percent_snapshot" numeric(5, 2) DEFAULT '10' NOT NULL;--> statement-breakpoint
+ALTER TABLE "settings" ADD COLUMN "donation_percent" numeric(5, 2) DEFAULT '10' NOT NULL;

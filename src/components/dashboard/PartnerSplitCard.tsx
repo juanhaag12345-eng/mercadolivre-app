@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Check, Loader2, Pencil, PiggyBank, Settings2, Users } from "lucide-react";
+import { Check, Church, Loader2, Pencil, PiggyBank, Settings2, Users } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { PercentInput } from "@/components/ui/Field";
 import { Button } from "@/components/ui/Button";
@@ -10,21 +10,26 @@ import { formatCurrency } from "@/lib/format";
 import { DISPATCHER_LABELS } from "@/db/schema";
 
 export function PartnerSplitCard({
+  donationAmount,
   reserveAmount,
   juanTotal,
   djowTotal,
+  donationPercent,
   operationalFeePercent,
   reservePercent,
 }: {
+  donationAmount: number;
   reserveAmount: number;
   juanTotal: number;
   djowTotal: number;
+  donationPercent: number;
   operationalFeePercent: number;
   reservePercent: number;
 }) {
   const [editing, setEditing] = useState(false);
   const [feeValue, setFeeValue] = useState(operationalFeePercent);
   const [reserveValue, setReserveValue] = useState(reservePercent);
+  const [donationValue, setDonationValue] = useState(donationPercent);
   const [isPending, startTransition] = useTransition();
 
   return (
@@ -56,6 +61,10 @@ export function PartnerSplitCard({
             <Settings2 size={13} />
             Percentuais usados nas próximas vendas registradas
           </div>
+          <div>
+            <label className="mb-1 block text-xs text-muted">Igreja / doação (tirado primeiro, do lucro cheio)</label>
+            <PercentInput value={donationValue} onValueChange={setDonationValue} className="h-11" />
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="mb-1 block text-xs text-muted">Remuneração operacional</label>
@@ -66,6 +75,9 @@ export function PartnerSplitCard({
               <PercentInput value={reserveValue} onValueChange={setReserveValue} className="h-11" />
             </div>
           </div>
+          <p className="text-xs text-muted">
+            Remuneração operacional e reserva são calculadas sobre o lucro já descontada a doação.
+          </p>
           <div className="flex justify-end gap-2">
             <Button
               variant="ghost"
@@ -74,6 +86,7 @@ export function PartnerSplitCard({
               onClick={() => {
                 setFeeValue(operationalFeePercent);
                 setReserveValue(reservePercent);
+                setDonationValue(donationPercent);
                 setEditing(false);
               }}
             >
@@ -85,7 +98,7 @@ export function PartnerSplitCard({
               disabled={isPending}
               onClick={() =>
                 startTransition(async () => {
-                  await updateSettings(feeValue, reserveValue);
+                  await updateSettings(feeValue, reserveValue, donationValue);
                   setEditing(false);
                 })
               }
@@ -97,8 +110,16 @@ export function PartnerSplitCard({
         </div>
       ) : (
         <div className="space-y-3">
+          <div className="rounded-xl border border-accent/30 bg-accent-soft px-3 py-2.5">
+            <div className="flex items-center gap-1.5 text-xs text-muted">
+              <Church size={12} /> Igreja / doação ({donationPercent}% do lucro da venda)
+            </div>
+            <p className="text-lg font-bold">{formatCurrency(donationAmount)}</p>
+          </div>
           <div className="rounded-xl bg-surface-muted px-3 py-2.5">
-            <p className="text-xs text-muted">Reserva da empresa ({reservePercent}% do lucro da venda)</p>
+            <p className="text-xs text-muted">
+              Reserva da empresa ({reservePercent}% do lucro após a doação)
+            </p>
             <p className="text-lg font-bold">{formatCurrency(reserveAmount)}</p>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -116,8 +137,9 @@ export function PartnerSplitCard({
             </div>
           </div>
           <p className="text-xs text-muted">
-            Remuneração operacional de {operationalFeePercent}% do lucro vai inteira para quem despachou; o restante
-            é dividido 50/50 entre os dois sócios. Reserva + Juan + Djow fecha no lucro da venda.
+            Primeiro sai a doação ({donationPercent}% do lucro cheio). Do restante, a remuneração operacional de{" "}
+            {operationalFeePercent}% vai inteira para quem despachou; o que sobra é dividido 50/50 entre os dois
+            sócios. Doação + Reserva + Juan + Djow fecha no lucro da venda.
           </p>
         </div>
       )}

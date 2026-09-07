@@ -55,6 +55,7 @@ export default async function DashboardPage(props: PageProps<"/">) {
       acc.revenue += s.revenue;
       acc.profit += s.profit;
       acc.quantity += s.quantity;
+      acc.donationAmount += s.donationAmount;
       acc.reserveAmount += s.reserveAmount;
       acc.juanTotal += s.juanTotal;
       acc.djowTotal += s.djowTotal;
@@ -63,7 +64,7 @@ export default async function DashboardPage(props: PageProps<"/">) {
       if (s.orderStatus === "pendente") acc.pending += 1;
       return acc;
     },
-    { revenue: 0, profit: 0, quantity: 0, pending: 0, reserveAmount: 0, juanTotal: 0, djowTotal: 0, shippingTotal: 0, saleFeeTotal: 0 }
+    { revenue: 0, profit: 0, quantity: 0, pending: 0, donationAmount: 0, reserveAmount: 0, juanTotal: 0, djowTotal: 0, shippingTotal: 0, saleFeeTotal: 0 }
   );
   const avgMargin = totals.revenue > 0 ? (totals.profit / totals.revenue) * 100 : 0;
   // Taxa de envio: valor total pago em frete no período e quanto isso
@@ -192,9 +193,11 @@ export default async function DashboardPage(props: PageProps<"/">) {
         </div>
         <div className="md:col-span-2 md:row-span-2">
           <PartnerSplitCard
+            donationAmount={totals.donationAmount}
             reserveAmount={totals.reserveAmount}
             juanTotal={totals.juanTotal}
             djowTotal={totals.djowTotal}
+            donationPercent={partnerSettings.donationPercent}
             operationalFeePercent={partnerSettings.operationalFeePercent}
             reservePercent={partnerSettings.reservePercent}
           />

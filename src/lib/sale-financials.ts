@@ -15,6 +15,7 @@ export function withFinancials(sale: typeof sales.$inferSelect) {
   const partnerSplit = computePartnerSplit({
     profit: breakdown.profit,
     revenue: breakdown.revenue,
+    donationPercent: toNumber(sale.donationPercentSnapshot),
     operationalFeePercent: toNumber(sale.operationalFeePercentSnapshot),
     reservePercent: toNumber(sale.reservePercentSnapshot),
     dispatchedBy: sale.dispatchedBy,

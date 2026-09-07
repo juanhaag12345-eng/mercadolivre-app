@@ -110,6 +110,7 @@ export async function createSale(
     dispatchedBy: values.dispatchedBy,
     operationalFeePercentSnapshot: partnerSettings.operationalFeePercent.toString(),
     reservePercentSnapshot: partnerSettings.reservePercent.toString(),
+    donationPercentSnapshot: partnerSettings.donationPercent.toString(),
     notes: values.notes || null,
     unitPriceSnapshot: (values.unitPriceOverride ?? toNumber(product.unitPrice)).toString(),
     kitQuantitySnapshot: product.kitQuantity,

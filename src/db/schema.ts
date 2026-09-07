@@ -123,6 +123,14 @@ export const sales = pgTable(
     })
       .notNull()
       .default("30"),
+    // % do lucro separado para igreja/doação, retirado antes de qualquer
+    // outra divisão (reserva, remuneração operacional e sócios).
+    donationPercentSnapshot: numeric("donation_percent_snapshot", {
+      precision: 5,
+      scale: 2,
+    })
+      .notNull()
+      .default("10"),
 
     // --- Snapshot dos valores financeiros do produto no momento da venda ---
     // Isso garante que editar o cadastro do produto depois não altere o
@@ -183,8 +191,9 @@ export const monthlyGoals = pgTable("monthly_goals", {
 });
 
 // Configurações gerais da divisão de lucro entre os sócios (linha única,
-// id fixo "default"). A reserva da empresa e a remuneração operacional de
-// quem despacha são sempre um percentual configurável; a divisão do que
+// id fixo "default"). A doação é sempre a primeira fatia retirada do lucro;
+// a reserva da empresa e a remuneração operacional de quem despacha são um
+// percentual configurável do que sobra depois da doação; a divisão do que
 // sobra entre os dois sócios é sempre 50/50.
 export const settings = pgTable("settings", {
   id: text("id").primaryKey().default("default"),
@@ -197,6 +206,11 @@ export const settings = pgTable("settings", {
   reservePercent: numeric("reserve_percent", { precision: 5, scale: 2 })
     .notNull()
     .default("30"),
+  // % do lucro separado para igreja/doação, retirado antes de qualquer
+  // outra divisão.
+  donationPercent: numeric("donation_percent", { precision: 5, scale: 2 })
+    .notNull()
+    .default("10"),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

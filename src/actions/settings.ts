@@ -9,11 +9,15 @@ import { toNumber } from "@/lib/calculations";
 export interface PartnerSettings {
   operationalFeePercent: number;
   reservePercent: number;
+  // % do lucro separado para igreja/doação, retirado antes de qualquer
+  // outra divisão (reserva, remuneração operacional e sócios).
+  donationPercent: number;
 }
 
 const DEFAULT_SETTINGS: PartnerSettings = {
   operationalFeePercent: 5,
   reservePercent: 30,
+  donationPercent: 10,
 };
 
 export async function getSettings(): Promise<PartnerSettings> {
@@ -22,22 +26,29 @@ export async function getSettings(): Promise<PartnerSettings> {
   return {
     operationalFeePercent: toNumber(rows[0].operationalFeePercent),
     reservePercent: toNumber(rows[0].reservePercent),
+    donationPercent: toNumber(rows[0].donationPercent),
   };
 }
 
-export async function updateSettings(operationalFeePercent: number, reservePercent: number) {
+export async function updateSettings(
+  operationalFeePercent: number,
+  reservePercent: number,
+  donationPercent: number
+) {
   await db
     .insert(settings)
     .values({
       id: "default",
       operationalFeePercent: operationalFeePercent.toString(),
       reservePercent: reservePercent.toString(),
+      donationPercent: donationPercent.toString(),
     })
     .onConflictDoUpdate({
       target: settings.id,
       set: {
         operationalFeePercent: operationalFeePercent.toString(),
         reservePercent: reservePercent.toString(),
+        donationPercent: donationPercent.toString(),
         updatedAt: new Date(),
       },
     });

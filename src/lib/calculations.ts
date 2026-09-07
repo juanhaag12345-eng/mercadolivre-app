@@ -69,50 +69,65 @@ export function calculateFinancials(inputs: FinancialInputs): FinancialBreakdown
 
 export interface PartnerSplitInputs {
   // Lucro da venda (o "profit" de calculateFinancials) — base de TODOS os
-  // percentuais abaixo (reserva e remuneração operacional).
+  // percentuais abaixo (doação, reserva e remuneração operacional).
   profit: number;
   revenue: number;
-  // % do lucro pago a quem despachou, pela execução da venda. Sai do valor
-  // distribuível (não é somado por fora nem tirado da reserva).
+  // % do lucro separado para igreja/doação, retirado ANTES de qualquer
+  // outra divisão — reserva, remuneração operacional e sócios são todos
+  // calculados sobre o que sobra depois da doação.
+  donationPercent: number;
+  // % do lucro (já descontada a doação) pago a quem despachou, pela
+  // execução da venda. Sai do valor distribuível (não é somado por fora
+  // nem tirado da reserva).
   operationalFeePercent: number;
-  // % do lucro da venda que fica de reserva na empresa
+  // % do lucro (já descontada a doação) que fica de reserva na empresa
   reservePercent: number;
   dispatchedBy: Dispatcher;
 }
 
 export interface PartnerSplitBreakdown {
+  // Fatia separada para igreja/doação — sai primeiro, sobre o lucro cheio
+  donationAmount: number;
   // Remuneração operacional: sai do valor distribuível, inteira pra quem despachou
   operationalFee: number;
   reserveAmount: number;
-  // O que sobra pra dividir 50/50 entre os sócios, já descontada a reserva
-  // e a remuneração operacional
+  // O que sobra pra dividir 50/50 entre os sócios, já descontada a doação,
+  // a reserva e a remuneração operacional
   distributableAmount: number;
   // Metade do distribuível — vai igual pros dois, independente de quem despachou
   partnerShare: number;
   // Quanto cada sócio embolsa NESSA venda: metade do distribuível + a
   // remuneração operacional inteira, só para quem despachou.
-  // reserveAmount + juanTotal + djowTotal fecha exatamente no lucro da venda.
+  // donationAmount + reserveAmount + juanTotal + djowTotal fecha exatamente
+  // no lucro da venda.
   juanTotal: number;
   djowTotal: number;
 }
 
 /**
- * Divide o lucro de uma venda entre reserva da empresa e os dois sócios.
- * Reserva e remuneração operacional são sempre % do lucro da venda (nunca
- * da receita): reserva = lucro × reservePercent; remuneração operacional =
- * lucro × operationalFeePercent, paga inteira a quem despachou; o restante
- * é dividido 50/50 entre os sócios. A soma das três partes fecha no lucro.
+ * Divide o lucro de uma venda entre doação, reserva da empresa e os dois
+ * sócios. A doação sai primeiro, sempre um % do lucro cheio da venda:
+ * donationAmount = lucro × donationPercent. Reserva e remuneração
+ * operacional são um % do que sobra depois da doação (nunca do lucro
+ * cheio nem da receita): reserva = restante × reservePercent; remuneração
+ * operacional = restante × operationalFeePercent, paga inteira a quem
+ * despachou; o que sobra é dividido 50/50 entre os sócios. A soma das
+ * quatro partes (doação + reserva + Juan + Djow) fecha no lucro da venda.
  */
 export function computePartnerSplit(inputs: PartnerSplitInputs): PartnerSplitBreakdown {
-  const reserveAmount = inputs.profit * (inputs.reservePercent / 100);
-  const operationalFee = inputs.profit * (inputs.operationalFeePercent / 100);
-  const distributableAmount = inputs.profit - reserveAmount - operationalFee;
+  const donationAmount = inputs.profit * (inputs.donationPercent / 100);
+  const remainingProfit = inputs.profit - donationAmount;
+
+  const reserveAmount = remainingProfit * (inputs.reservePercent / 100);
+  const operationalFee = remainingProfit * (inputs.operationalFeePercent / 100);
+  const distributableAmount = remainingProfit - reserveAmount - operationalFee;
   const partnerShare = distributableAmount / 2;
 
   const juanTotal = partnerShare + (inputs.dispatchedBy === "juan" ? operationalFee : 0);
   const djowTotal = partnerShare + (inputs.dispatchedBy === "djow" ? operationalFee : 0);
 
   return {
+    donationAmount,
     operationalFee,
     reserveAmount,
     distributableAmount,
