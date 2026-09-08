@@ -205,7 +205,12 @@ export interface MlOrderItem {
   };
   quantity: number;
   unit_price: number;
-  // Comissão do Mercado Livre para esse item, já calculada pela API.
+  // Comissão do Mercado Livre para esse item — IMPORTANTE: é o valor POR
+  // UNIDADE, não o total da linha. Confirmado comparando um pedido de 5
+  // unidades (sale_fee: 34.99) com a "Tarifa de venda total" que a própria
+  // Central de Vendedores do Mercado Livre mostra pra essa venda (R$174,95
+  // = 34.99 × 5). Por isso sempre multiplicamos por `quantity` antes de
+  // gravar/exibir (ver upsertPendingSalesFromOrder).
   sale_fee?: number;
 }
 
@@ -214,6 +219,12 @@ export interface MlOrder {
   date_created: string;
   status: string;
   order_items: MlOrderItem[];
+  // ID do "pack" ao qual o pedido pertence. A Central de Vendedores do
+  // Mercado Livre identifica a venda por esse número (não pelo order_id) —
+  // até pedidos de um único item costumam vir com pack_id preenchido.
+  // Guardamos só pra exibição, pra bater com o link que o vendedor abre no
+  // site do Mercado Livre.
+  pack_id?: number | null;
   buyer?: {
     nickname?: string;
   };
@@ -334,14 +345,23 @@ export async function upsertPendingSalesFromOrder(
     }
   }
 
+  const packId = order.pack_id != null ? String(order.pack_id) : null;
+
   for (const orderItem of order.order_items) {
-    const saleFee = orderItem.sale_fee !== undefined ? orderItem.sale_fee.toString() : null;
+    // sale_fee vem por UNIDADE — multiplicamos pela quantidade pra bater com
+    // a "Tarifa de venda total" que a Central de Vendedores do Mercado Livre
+    // mostra pra essa venda (ver comentário em MlOrderItem.sale_fee).
+    const saleFee =
+      orderItem.sale_fee !== undefined
+        ? (orderItem.sale_fee * orderItem.quantity).toFixed(2)
+        : null;
 
     await db
       .insert(pendingSales)
       .values({
         mlOrderId: String(order.id),
         mlOrderItemId: orderItem.item.id,
+        mlPackId: packId,
         titleSnapshot: orderItem.item.title,
         quantity: orderItem.quantity,
         unitPriceSnapshot: orderItem.unit_price.toString(),
@@ -355,6 +375,7 @@ export async function upsertPendingSalesFromOrder(
       .onConflictDoUpdate({
         target: [pendingSales.mlOrderId, pendingSales.mlOrderItemId],
         set: {
+          mlPackId: packId,
           titleSnapshot: orderItem.item.title,
           quantity: orderItem.quantity,
           unitPriceSnapshot: orderItem.unit_price.toString(),

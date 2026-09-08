@@ -35,7 +35,11 @@ export function PendingSaleCard({ pending, products }: { pending: PendingSale; p
         <div className="min-w-0">
           <p className="font-semibold text-sm truncate">{pending.titleSnapshot}</p>
           <p className="text-xs text-muted mt-0.5">
-            Pedido ML #{pending.mlOrderId} · {formatDate(new Date(pending.orderDate))}
+            Pedido ML #{pending.mlOrderId}
+            {pending.mlPackId && pending.mlPackId !== pending.mlOrderId
+              ? ` (venda #${pending.mlPackId} na Central de Vendedores)`
+              : ""}{" "}
+            · {formatDate(new Date(pending.orderDate))}
             {pending.buyerNickname ? ` · comprador ${pending.buyerNickname}` : ""}
           </p>
         </div>

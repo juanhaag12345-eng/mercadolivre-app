@@ -43,6 +43,13 @@
       "when": 1788828896787,
       "tag": "0005_add_ml_fees_to_pending_sales",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788905440238,
+      "tag": "0006_add_ml_pack_id_to_pending_sales",
+      "breakpoints": true
     }
   ]
 }

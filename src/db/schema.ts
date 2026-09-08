@@ -257,6 +257,13 @@ export const pendingSales = pgTable(
 
     mlOrderId: text("ml_order_id").notNull(),
     mlOrderItemId: text("ml_order_item_id").notNull(),
+    // ID do "pack" do Mercado Livre (order.pack_id). A Central de Vendedores
+    // do próprio Mercado Livre identifica a venda por esse número, não pelo
+    // order_id — mesmo quando não há carrinho com itens de vendedores
+    // diferentes, uma compra de uma unidade só já vem com pack_id preenchido.
+    // Guardamos só para exibição, pra bater com o link que o vendedor abre
+    // no site do Mercado Livre; null quando o Mercado Livre não retornar.
+    mlPackId: text("ml_pack_id"),
 
     // Dados do pedido no momento em que recebemos/consultamos — apenas para
     // exibição na tela de revisão, não afetam o cálculo financeiro (que usa

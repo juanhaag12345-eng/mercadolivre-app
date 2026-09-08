@@ -1,0 +1,1 @@
+ALTER TABLE "pending_sales" ADD COLUMN "ml_pack_id" text;
