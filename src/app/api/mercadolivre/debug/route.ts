@@ -19,23 +19,33 @@ const ML_APP_ID = "8549699768586111";
 //
 // Com ?shipmentId=..., busca o JSON bruto de GET /shipments/$id/costs.
 //
+// Com ?shipmentId=...&address=1, busca GET /shipments/$id?views=destination
+// com o header X-Api-Version: 2 — serve pra checar se o nome real do
+// comprador (receiver_name, quem recebe a encomenda) vem preenchido, já
+// que a API de orders só devolve o id do buyer (nickname/nome completo não
+// são expostos ali por privacidade).
+//
 // Não expõe nenhum segredo (o access_token nunca sai daqui).
 export async function GET(request: NextRequest) {
   try {
     const accessToken = await getValidAccessToken();
     const orderId = request.nextUrl.searchParams.get("orderId");
     const shipmentId = request.nextUrl.searchParams.get("shipmentId");
+    const wantAddress = request.nextUrl.searchParams.get("address") === "1";
 
     const url = orderId
       ? `https://api.mercadolibre.com/orders/${orderId}`
       : shipmentId
-        ? `https://api.mercadolibre.com/shipments/${shipmentId}/costs`
+        ? wantAddress
+          ? `https://api.mercadolibre.com/shipments/${shipmentId}?views=destination`
+          : `https://api.mercadolibre.com/shipments/${shipmentId}/costs`
         : `https://api.mercadolibre.com/missed_feeds?app_id=${ML_APP_ID}`;
 
     const response = await fetch(url, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
         ...(shipmentId ? { "x-format-new": "true" } : {}),
+        ...(wantAddress ? { "X-Api-Version": "2" } : {}),
       },
     });
     const body = await response.json();
