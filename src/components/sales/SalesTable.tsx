@@ -41,7 +41,7 @@ export function SalesTable({ sales }: { sales: SaleListRow[] }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-muted border-b border-border">
-              <th className="px-5 py-2.5 font-medium">Produto</th>
+              <th className="px-5 py-2.5 font-medium">Anúncio</th>
               <th className="px-3 py-2.5 font-medium">Data</th>
               <th className="px-3 py-2.5 font-medium">Qtd</th>
               <th className="px-3 py-2.5 font-medium">Receita</th>

@@ -50,6 +50,13 @@
       "when": 1788905440238,
       "tag": "0006_add_ml_pack_id_to_pending_sales",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788907809465,
+      "tag": "0007_ml_sales_source_and_custo_manual",
+      "breakpoints": true
     }
   ]
 }

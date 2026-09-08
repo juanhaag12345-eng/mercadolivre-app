@@ -18,6 +18,18 @@ export function formatDate(value: string | Date): string {
   }).format(date);
 }
 
+// Fuso horário do negócio, usado abaixo em formatTime — precisa ser
+// explícito porque em produção o servidor roda em UTC.
+const FORMAT_TIME_ZONE = "America/Sao_Paulo";
+
+export function formatTime(value: Date): string {
+  return new Intl.DateTimeFormat("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: FORMAT_TIME_ZONE,
+  }).format(value);
+}
+
 export function formatDateLong(value: string | Date): string {
   const date = typeof value === "string" ? new Date(value + "T00:00:00") : value;
   return new Intl.DateTimeFormat("pt-BR", {

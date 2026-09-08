@@ -28,7 +28,7 @@ export function SupplyCostTable({ rows }: { rows: SupplyCostRow[] }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-muted border-b border-border">
-              <th className="px-5 py-2.5 font-medium">Produto</th>
+              <th className="px-5 py-2.5 font-medium">Produto / anúncio</th>
               <th className="px-3 py-2.5 font-medium">Custo por unidade</th>
               <th className="px-3 py-2.5 font-medium">Unidades vendidas</th>
               <th className="px-3 py-2.5 font-medium">Gasto até agora</th>
@@ -39,7 +39,9 @@ export function SupplyCostTable({ rows }: { rows: SupplyCostRow[] }) {
               <tr key={row.id} className="border-b border-border last:border-0 hover:bg-surface-muted/40">
                 <td className="px-5 py-3 font-medium max-w-[260px]">
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs text-muted shrink-0">#{row.internalCode}</span>
+                    {row.internalCode !== null && (
+                      <span className="font-mono text-xs text-muted shrink-0">#{row.internalCode}</span>
+                    )}
                     <span className="truncate">{row.name}</span>
                     {row.isKit && (
                       <Badge tone="accent" className="shrink-0">

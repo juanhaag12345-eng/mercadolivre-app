@@ -18,7 +18,7 @@ export function TopProducts({ rows }: { rows: TopProductRow[] }) {
     <Card>
       <div className="flex items-center gap-2 mb-4">
         <Trophy size={16} className="text-muted" />
-        <h2 className="font-semibold">Mais vendidos no período</h2>
+        <h2 className="font-semibold">Anúncios mais vendidos no período</h2>
       </div>
       {rows.length === 0 ? (
         <p className="text-sm text-muted py-6 text-center">Nenhuma venda no período.</p>

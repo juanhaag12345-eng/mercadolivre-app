@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { Plus, Package, PackageX, CheckCircle2 } from "lucide-react";
+import { Plus, Package, PackageX, CheckCircle2, ShoppingBag } from "lucide-react";
 import { listProducts } from "@/actions/products";
+import { listAdTitleSummaries } from "@/actions/sales";
 import { ProductSearchBar } from "@/components/products/ProductSearchBar";
 import { Badge, Card } from "@/components/ui/Card";
 import { LinkButton } from "@/components/ui/Button";
 import { calculateFinancials, toNumber } from "@/lib/calculations";
-import { formatCurrency, formatPercent } from "@/lib/format";
+import { formatCurrency, formatDate, formatPercent } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,10 @@ export default async function ProdutosPage(props: PageProps<"/produtos">) {
   const atualizado = typeof searchParams.atualizado === "string" ? searchParams.atualizado : undefined;
   const excluido = searchParams.excluido === "1";
 
-  const productList = await listProducts(q);
+  const [productList, adTitles] = await Promise.all([listProducts(q), listAdTitleSummaries()]);
+  const filteredAdTitles = q
+    ? adTitles.filter((a) => a.title.toLowerCase().includes(q.toLowerCase()))
+    : adTitles;
 
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto animate-in">
@@ -24,7 +28,8 @@ export default async function ProdutosPage(props: PageProps<"/produtos">) {
         <div>
           <h1 className="text-2xl font-bold">Produtos</h1>
           <p className="text-sm text-muted mt-0.5">
-            Cadastre seus produtos e kits com taxas, frete e custos.
+            Catálogo manual (taxas, frete e custos configurados por você) e anúncios vendidos pelo Mercado Livre
+            (dados reais, abaixo).
           </p>
         </div>
         <LinkButton href="/produtos/novo" variant="secondary" size="lg">
@@ -105,6 +110,58 @@ export default async function ProdutosPage(props: PageProps<"/produtos">) {
                   </div>
                 </Card>
               </Link>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="flex items-center gap-2 mt-10 mb-5">
+        <ShoppingBag size={18} className="text-muted" />
+        <div>
+          <h2 className="text-lg font-bold">Anúncios do Mercado Livre</h2>
+          <p className="text-xs text-muted">
+            Cada anúncio vendido a partir de 01/09/2026, com receita, lucro e margem calculados a partir dos dados
+            reais do Mercado Livre.
+          </p>
+        </div>
+      </div>
+
+      {filteredAdTitles.length === 0 ? (
+        <Card className="flex flex-col items-center justify-center py-12 text-center">
+          <ShoppingBag size={32} className="text-muted mb-3" />
+          <p className="font-semibold text-sm">Nenhum anúncio vendido ainda</p>
+          <p className="text-xs text-muted mt-1 max-w-sm">
+            Assim que uma venda do Mercado Livre for confirmada em /pendentes, o anúncio aparece aqui.
+          </p>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+          {filteredAdTitles.map((ad) => {
+            const marginTone = ad.marginPercent >= 20 ? "success" : ad.marginPercent >= 0 ? "warning" : "danger";
+            return (
+              <Card key={ad.title}>
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface-muted">
+                      <ShoppingBag size={16} className="text-muted" />
+                    </span>
+                    <p className="font-semibold text-sm leading-snug line-clamp-2">{ad.title}</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  <Badge tone="neutral">{ad.quantity} vendido(s)</Badge>
+                  <Badge tone="neutral">última venda {formatDate(ad.lastSaleDate)}</Badge>
+                </div>
+
+                <div className="flex items-end justify-between">
+                  <div>
+                    <p className="text-xs text-muted">Receita acumulada</p>
+                    <p className="text-lg font-bold">{formatCurrency(ad.revenue)}</p>
+                  </div>
+                  <Badge tone={marginTone}>{formatPercent(ad.marginPercent)} margem</Badge>
+                </div>
+              </Card>
             );
           })}
         </div>

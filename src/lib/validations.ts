@@ -44,12 +44,13 @@ export const settingsSchema = z.object({
   reservePercent: z.coerce.number().min(0).max(100),
 });
 
-// Confirmação de uma venda pendente vinda do Mercado Livre — a pessoa só
-// escolhe o produto interno correspondente e quem despachou; os valores
-// financeiros vêm do cadastro do produto (mesma lógica de uma venda manual).
+// Confirmação de uma venda pendente vinda do Mercado Livre — título do
+// anúncio, receita, tarifa de venda e frete já vêm prontos do Mercado
+// Livre; a pessoa só informa o custo do produto dessa venda e quem
+// despachou.
 export const confirmPendingSaleSchema = z.object({
-  productId: z.string().uuid("Selecione o produto correspondente"),
   quantity: z.coerce.number().int().min(1, "Mínimo 1"),
   saleDate: z.string().min(1, "Informe a data"),
   dispatchedBy: z.enum(DISPATCHERS, { message: "Selecione quem despachou" }),
+  productCostManual: z.coerce.number().min(0, "Informe o custo do produto (pode ser 0)"),
 });

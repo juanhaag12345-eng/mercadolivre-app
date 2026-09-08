@@ -3,9 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { eq, and } from "drizzle-orm";
 import { db } from "@/db";
-import { pendingSales, products, sales } from "@/db/schema";
+import { pendingSales, sales } from "@/db/schema";
 import { confirmPendingSaleSchema } from "@/lib/validations";
-import { toNumber } from "@/lib/calculations";
 import { getSettings } from "@/actions/settings";
 import {
   getConnectionStatus,
@@ -17,12 +16,20 @@ import type { ActionResult } from "@/actions/products";
 
 export { getConnectionStatus };
 
+// A partir daqui o dashboard passou a ser alimentado só com dados reais do
+// Mercado Livre (título do anúncio, receita, tarifas e frete) em vez do
+// cadastro manual de produtos — pedido do usuário em 08/09/2026. Pedidos
+// anteriores a essa data continuam existindo no Mercado Livre, mas não
+// devem ser trazidos para /pendentes nessa reformulação.
+const SYNC_MIN_DATE = new Date("2026-09-01T00:00:00-03:00");
+
 /**
  * Busca manualmente os pedidos mais recentes do vendedor direto na API do
  * Mercado Livre e atualiza /pendentes — rede de segurança para o caso do
  * webhook não ter recebido (ou ainda não receber) a notificação de uma
  * venda nova. Idempotente: rodar de novo sobre os mesmos pedidos não
- * duplica nem desfaz confirmações já feitas.
+ * duplica nem desfaz confirmações já feitas. Ignora pedidos anteriores a
+ * SYNC_MIN_DATE.
  */
 export async function syncRecentOrders(): Promise<{ ok: boolean; message: string }> {
   const status = await getConnectionStatus();
@@ -31,7 +38,8 @@ export async function syncRecentOrders(): Promise<{ ok: boolean; message: string
   }
 
   try {
-    const orders = await searchRecentOrders(status.mlUserId, 20);
+    const allOrders = await searchRecentOrders(status.mlUserId, 20);
+    const orders = allOrders.filter((order) => new Date(order.date_created) >= SYNC_MIN_DATE);
     // Busca o access_token uma única vez aqui e reaproveita em todos os
     // pedidos do lote, em vez de cada upsertPendingSalesFromOrder buscar o
     // seu (evita N idas ao banco só pra ler a mesma credencial).
@@ -44,8 +52,14 @@ export async function syncRecentOrders(): Promise<{ ok: boolean; message: string
 
     revalidatePath("/pendentes");
 
-    if (orders.length === 0) {
+    if (allOrders.length === 0) {
       return { ok: true, message: "Nenhum pedido encontrado na conta do Mercado Livre." };
+    }
+    if (orders.length === 0) {
+      return {
+        ok: true,
+        message: `${allOrders.length} pedido(s) encontrado(s), mas todos anteriores a 01/09/2026 — nenhum trazido para os pendentes.`,
+      };
     }
     return {
       ok: true,
@@ -70,19 +84,19 @@ export async function listPendingSales() {
 
 function parseConfirmForm(formData: FormData) {
   return {
-    productId: String(formData.get("productId") ?? ""),
     quantity: Number(formData.get("quantity") ?? 1),
     saleDate: String(formData.get("saleDate") ?? ""),
     dispatchedBy: String(formData.get("dispatchedBy") ?? ""),
+    productCostManual: String(formData.get("productCostManual") ?? "0"),
   };
 }
 
 /**
- * Confirma uma venda pendente: cria a venda de verdade (reaproveitando os
- * dados financeiros cadastrados do produto interno escolhido, igual a uma
- * venda manual) e marca a pendência como resolvida. Os valores do Mercado
- * Livre (título, preço do anúncio etc.) são só para exibição na revisão —
- * quem manda no cálculo financeiro é sempre o cadastro do produto.
+ * Confirma uma venda pendente: cria a venda de verdade usando os valores
+ * REAIS que já vieram do Mercado Livre (título do anúncio, receita, tarifa
+ * de venda total, frete cobrado do vendedor) — não existe mais um produto
+ * cadastrado a escolher. A única informação que a pessoa precisa preencher
+ * é o custo do produto dessa venda e quem despachou.
  */
 export async function confirmPendingSale(
   pendingSaleId: string,
@@ -109,24 +123,20 @@ export async function confirmPendingSale(
     return { ok: false, errors: { form: "Essa venda pendente não existe mais ou já foi processada." } };
   }
 
-  const [product] = await db
-    .select()
-    .from(products)
-    .where(eq(products.id, parsed.data.productId))
-    .limit(1);
-
-  if (!product) {
-    return { ok: false, errors: { productId: "Produto não encontrado" } };
-  }
-
   const values = parsed.data;
   const partnerSettings = await getSettings();
+  const productCostManual = values.productCostManual.toFixed(2);
 
   const [createdSale] = await db
     .insert(sales)
     .values({
-      productId: product.id,
-      productNameSnapshot: product.name,
+      productId: null,
+      source: "mercadolivre",
+      productNameSnapshot: pending.titleSnapshot,
+      mlOrderId: pending.mlOrderId,
+      mlPackId: pending.mlPackId,
+      buyerNickname: pending.buyerNickname,
+      buyerFullName: pending.buyerFullName,
       quantity: values.quantity,
       saleDate: values.saleDate,
       // Confirmar uma venda vinda do Mercado Livre pressupõe que ela já
@@ -138,14 +148,22 @@ export async function confirmPendingSale(
       reservePercentSnapshot: partnerSettings.reservePercent.toString(),
       donationPercentSnapshot: partnerSettings.donationPercent.toString(),
       notes: `Importado do Mercado Livre — pedido ${pending.mlOrderId}.`,
-      unitPriceSnapshot: toNumber(product.unitPrice).toString(),
-      kitQuantitySnapshot: product.kitQuantity,
-      saleFeeTypeSnapshot: product.saleFeeType,
-      saleFeeValueSnapshot: toNumber(product.saleFeeValue).toString(),
-      freeShippingSnapshot: product.freeShipping,
-      shippingCostSnapshot: toNumber(product.shippingCost).toString(),
-      packagingCostSnapshot: toNumber(product.packagingCost).toString(),
-      productCostSnapshot: toNumber(product.productCost).toString(),
+      // Colunas do "modelo de receita" antigo (produto cadastrado) não se
+      // aplicam a uma venda do Mercado Livre — preenchidas com valores
+      // neutros só para satisfazer as colunas NOT NULL; withFinancials()
+      // ignora todas elas quando source = "mercadolivre" e usa os valores
+      // reais abaixo em vez disso.
+      unitPriceSnapshot: pending.unitPriceSnapshot,
+      kitQuantitySnapshot: 1,
+      saleFeeTypeSnapshot: "fixo",
+      saleFeeValueSnapshot: "0",
+      freeShippingSnapshot: false,
+      shippingCostSnapshot: "0",
+      packagingCostSnapshot: "0",
+      productCostSnapshot: "0",
+      mlSaleFeeTotalSnapshot: pending.mlSaleFeeSnapshot,
+      mlShippingTotalSnapshot: pending.mlShippingCostSnapshot,
+      productCostManualSnapshot: productCostManual,
     })
     .returning({ id: sales.id });
 
@@ -153,8 +171,8 @@ export async function confirmPendingSale(
     .update(pendingSales)
     .set({
       status: "confirmada",
-      matchedProductId: product.id,
       dispatchedBy: values.dispatchedBy,
+      productCostManual,
       resultingSaleId: createdSale.id,
       updatedAt: new Date(),
     })
@@ -163,6 +181,8 @@ export async function confirmPendingSale(
   revalidatePath("/pendentes");
   revalidatePath("/vendas");
   revalidatePath("/");
+  revalidatePath("/produtos");
+  revalidatePath("/custo-fornecimento");
   return { ok: true };
 }
 

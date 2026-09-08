@@ -1,7 +1,6 @@
 import { AlertTriangle, CheckCircle2, Inbox, Plug, Unplug } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { LinkButton } from "@/components/ui/Button";
-import { listProducts } from "@/actions/products";
 import { getConnectionStatus, listPendingSales } from "@/actions/mercadolivre";
 import { PendingSaleCard } from "@/components/pendentes/PendingSaleCard";
 import { SyncRecentOrdersButton } from "@/components/pendentes/SyncRecentOrdersButton";
@@ -19,10 +18,9 @@ export default async function PendentesPage(props: PageProps<"/pendentes">) {
   const conectado = searchParams.ml_conectado === "1";
   const erro = typeof searchParams.ml_erro === "string" ? searchParams.ml_erro : undefined;
 
-  const [connection, pendingSales, products] = await Promise.all([
+  const [connection, pendingSales] = await Promise.all([
     getConnectionStatus(),
     listPendingSales(),
-    listProducts(),
   ]);
 
   return (
@@ -30,8 +28,8 @@ export default async function PendentesPage(props: PageProps<"/pendentes">) {
       <div className="mb-6">
         <h1 className="text-2xl font-bold">Vendas pendentes de entrada</h1>
         <p className="text-sm text-muted mt-0.5">
-          Vendas recebidas automaticamente do Mercado Livre, aguardando você confirmar o produto e quem despachou
-          antes de entrarem no dashboard.
+          Vendas recebidas automaticamente do Mercado Livre, aguardando você preencher o custo do produto e quem
+          despachou antes de entrarem no dashboard.
         </p>
       </div>
 
@@ -92,7 +90,7 @@ export default async function PendentesPage(props: PageProps<"/pendentes">) {
       ) : (
         <div className="space-y-3">
           {pendingSales.map((pending) => (
-            <PendingSaleCard key={pending.id} pending={pending} products={products} />
+            <PendingSaleCard key={pending.id} pending={pending} />
           ))}
         </div>
       )}

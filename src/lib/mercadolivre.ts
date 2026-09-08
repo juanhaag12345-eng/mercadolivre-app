@@ -242,6 +242,12 @@ interface MlShipmentCosts {
   senders?: Array<{ user_id: number; cost: number }>;
 }
 
+interface MlShipmentDestination {
+  destination?: {
+    receiver_name?: string;
+  };
+}
+
 /**
  * Busca, para um envio específico, o valor que o Mercado Livre realmente
  * cobra do vendedor (campo "senders[].cost" do recurso /shipments/$id/costs).
@@ -274,6 +280,32 @@ async function fetchSellerShippingCost(
     : undefined;
   const cost = (match ?? senders[0]).cost;
   return cost ?? null;
+}
+
+/**
+ * Busca o nome real de quem recebe a encomenda (dono do endereço de
+ * destino do envio). A API de /orders só devolve o id do comprador —
+ * nickname e nome completo não são expostos ali por privacidade — mas o
+ * endereço de destino do envio traz o nome de quem vai receber, que na
+ * prática é o comprador na esmagadora maioria das compras pessoais.
+ * Confirmado contra um pedido real: GET /shipments/$id?views=destination
+ * com o header X-Api-Version: 2 devolve destination.receiver_name
+ * preenchido com o nome completo.
+ */
+async function fetchReceiverName(
+  shipmentId: number,
+  accessToken: string
+): Promise<string | null> {
+  const response = await fetch(`${ML_API_BASE}/shipments/${shipmentId}?views=destination`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "x-format-new": "true",
+      "X-Api-Version": "2",
+    },
+  });
+  if (!response.ok) return null;
+  const data = (await response.json()) as MlShipmentDestination;
+  return data.destination?.receiver_name ?? null;
 }
 
 export async function fetchOrder(orderId: string | number): Promise<MlOrder> {
@@ -331,16 +363,18 @@ export async function upsertPendingSalesFromOrder(
   ctx?: { accessToken?: string; sellerId?: string }
 ) {
   let shippingCost: string | null = null;
+  let buyerFullName: string | null = null;
   if (order.shipping?.id) {
     try {
       const accessToken = ctx?.accessToken ?? (await getValidAccessToken());
       const sellerId = ctx?.sellerId ?? (await getConnectionStatus()).mlUserId;
       const cost = await fetchSellerShippingCost(order.shipping.id, accessToken, sellerId);
       shippingCost = cost !== null ? cost.toString() : null;
+      buyerFullName = await fetchReceiverName(order.shipping.id, accessToken);
     } catch {
-      // Se a consulta de custo de envio falhar (ex.: token expirado no meio
-      // do processo), seguimos sem esse dado — não é motivo para deixar a
-      // venda inteira de fora dos pendentes.
+      // Se a consulta de custo de envio/nome do destinatário falhar (ex.:
+      // token expirado no meio do processo), seguimos sem esse dado — não é
+      // motivo para deixar a venda inteira de fora dos pendentes.
       shippingCost = null;
     }
   }
@@ -370,6 +404,7 @@ export async function upsertPendingSalesFromOrder(
         orderDate: new Date(order.date_created),
         orderStatusMl: order.status,
         buyerNickname: order.buyer?.nickname ?? null,
+        buyerFullName,
         rawOrderPayload: order,
       })
       .onConflictDoUpdate({
@@ -384,6 +419,7 @@ export async function upsertPendingSalesFromOrder(
           orderDate: new Date(order.date_created),
           orderStatusMl: order.status,
           buyerNickname: order.buyer?.nickname ?? null,
+          buyerFullName,
           rawOrderPayload: order,
           updatedAt: new Date(),
         },

@@ -29,6 +29,14 @@ export const DISPATCHER_LABELS: Record<Dispatcher, string> = {
   djow: "Djow",
 };
 
+// De onde veio a venda: "manual" é o fluxo antigo (cadastro de produto com
+// preço/taxa/frete configurados manualmente); "mercadolivre" é uma venda
+// confirmada a partir de /pendentes, onde os valores de receita, tarifa de
+// venda e frete já vêm prontos (reais) do Mercado Livre — não há "receita"
+// configurável a aplicar, só o custo do produto é preenchido manualmente.
+export const SALE_SOURCES = ["manual", "mercadolivre"] as const;
+export type SaleSource = (typeof SALE_SOURCES)[number];
+
 export const products = pgTable(
   "products",
   {
@@ -93,8 +101,19 @@ export const sales = pgTable(
       onDelete: "set null",
     }),
 
-    // Guardamos o nome no momento da venda (caso o produto seja excluído/renomeado depois)
+    // "manual" (cadastro de produto) ou "mercadolivre" (importada de /pendentes)
+    source: text("source", { enum: SALE_SOURCES }).notNull().default("manual"),
+
+    // Guardamos o nome no momento da venda (caso o produto seja excluído/renomeado
+    // depois) — para vendas do Mercado Livre, é o título do anúncio.
     productNameSnapshot: text("product_name_snapshot").notNull(),
+
+    // Rastreabilidade de volta ao pedido de origem no Mercado Livre (null
+    // para vendas manuais).
+    mlOrderId: text("ml_order_id"),
+    mlPackId: text("ml_pack_id"),
+    buyerNickname: text("buyer_nickname"),
+    buyerFullName: text("buyer_full_name"),
 
     quantity: integer("quantity").notNull().default(1),
     saleDate: date("sale_date").notNull(),
@@ -162,6 +181,28 @@ export const sales = pgTable(
       precision: 12,
       scale: 2,
     }).notNull(),
+
+    // --- Valores reais vindos do Mercado Livre (só quando source = "mercadolivre") ---
+    // As colunas de snapshot acima reconstroem a receita/tarifas a partir de
+    // uma "receita" configurável (preço unitário × qtd kit × taxa %) — isso
+    // não existe para vendas do Mercado Livre, onde a tarifa de venda e o
+    // frete já chegam prontos, como valores reais e totais. Por isso ficam
+    // em colunas separadas, e withFinancials() usa essas direto (sem passar
+    // por calculateFinancials) quando source = "mercadolivre".
+    mlSaleFeeTotalSnapshot: numeric("ml_sale_fee_total_snapshot", {
+      precision: 12,
+      scale: 2,
+    }),
+    mlShippingTotalSnapshot: numeric("ml_shipping_total_snapshot", {
+      precision: 12,
+      scale: 2,
+    }),
+    // Custo TOTAL (não por unidade) da mercadoria dessa venda, preenchido
+    // manualmente na tela de pendentes no momento da confirmação.
+    productCostManualSnapshot: numeric("product_cost_manual_snapshot", {
+      precision: 12,
+      scale: 2,
+    }),
 
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -285,14 +326,27 @@ export const pendingSales = pgTable(
     orderDate: timestamp("order_date", { withTimezone: true }).notNull(),
     orderStatusMl: text("order_status_ml").notNull(),
     buyerNickname: text("buyer_nickname"),
+    // Nome real de quem recebe a encomenda — vem de
+    // GET /shipments/$id?views=destination (header X-Api-Version: 2, campo
+    // receiver_name). A API de /orders só devolve o id do comprador, nunca o
+    // nome, por privacidade; o nome do destinatário do envio é o melhor
+    // substituto disponível. Fica null quando o envio ainda não tem endereço
+    // de destino processado.
+    buyerFullName: text("buyer_full_name"),
     rawOrderPayload: jsonb("raw_order_payload"),
 
     status: text("status", { enum: PENDING_SALE_STATUSES }).notNull().default("pendente"),
 
     // Preenchidos pela pessoa na hora de confirmar a entrada da venda.
+    // matchedProductId é do fluxo antigo (escolher um produto cadastrado) —
+    // mantido na tabela só por compatibilidade com linhas antigas, mas não é
+    // mais preenchido: a confirmação agora usa o título do anúncio direto.
     matchedProductId: uuid("matched_product_id").references(() => products.id, {
       onDelete: "set null",
     }),
+    // Custo TOTAL (não por unidade) da mercadoria dessa venda, preenchido
+    // manualmente por quem confirma a entrada.
+    productCostManual: numeric("product_cost_manual", { precision: 12, scale: 2 }),
     dispatchedBy: text("dispatched_by", { enum: DISPATCHERS }),
 
     // Venda real criada no momento da confirmação (referência só para

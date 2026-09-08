@@ -168,3 +168,47 @@ export async function getProductNamesForFilter() {
     .orderBy(asc(sales.productNameSnapshot));
   return rows.filter((r) => r.id !== null) as { id: string; name: string }[];
 }
+
+export interface AdTitleSummary {
+  title: string;
+  revenue: number;
+  profit: number;
+  quantity: number;
+  marginPercent: number;
+  lastSaleDate: string;
+}
+
+/**
+ * Agrega as vendas confirmadas do Mercado Livre por título de anúncio — não
+ * existe mais um "produto cadastrado" por trás delas, então o próprio título
+ * faz esse papel na tela de produtos (mesma lógica usada em "anúncios mais
+ * vendidos" no dashboard).
+ */
+export async function listAdTitleSummaries(): Promise<AdTitleSummary[]> {
+  const rows = await db.select().from(sales).where(eq(sales.source, "mercadolivre"));
+  const byTitle = new Map<string, AdTitleSummary>();
+
+  for (const row of rows) {
+    const financials = withFinancials(row);
+    const entry = byTitle.get(row.productNameSnapshot) ?? {
+      title: row.productNameSnapshot,
+      revenue: 0,
+      profit: 0,
+      quantity: 0,
+      marginPercent: 0,
+      lastSaleDate: row.saleDate,
+    };
+    entry.revenue += financials.revenue;
+    entry.profit += financials.profit;
+    entry.quantity += row.quantity;
+    if (row.saleDate > entry.lastSaleDate) entry.lastSaleDate = row.saleDate;
+    byTitle.set(row.productNameSnapshot, entry);
+  }
+
+  const summaries = Array.from(byTitle.values()).map((entry) => ({
+    ...entry,
+    marginPercent: entry.revenue > 0 ? (entry.profit / entry.revenue) * 100 : 0,
+  }));
+  summaries.sort((a, b) => b.revenue - a.revenue);
+  return summaries;
+}
