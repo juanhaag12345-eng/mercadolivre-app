@@ -26,6 +26,8 @@ export function PendingSaleCard({ pending, products }: { pending: PendingSale; p
 
   const orderedProducts = suggestProducts(pending.titleSnapshot, products);
   const unitPrice = Number(pending.unitPriceSnapshot);
+  const mlSaleFee = pending.mlSaleFeeSnapshot !== null ? Number(pending.mlSaleFeeSnapshot) : null;
+  const mlShippingCost = pending.mlShippingCostSnapshot !== null ? Number(pending.mlShippingCostSnapshot) : null;
 
   return (
     <Card className="space-y-3">
@@ -41,6 +43,21 @@ export function PendingSaleCard({ pending, products }: { pending: PendingSale; p
           {pending.quantity}x {formatCurrency(unitPrice)}
         </span>
       </div>
+
+      {(mlSaleFee !== null || mlShippingCost !== null) && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          {mlSaleFee !== null && (
+            <span className="rounded-full bg-surface-muted px-2.5 py-1 text-muted">
+              Taxa de venda ML: <span className="font-semibold text-foreground">{formatCurrency(mlSaleFee)}</span>
+            </span>
+          )}
+          {mlShippingCost !== null && (
+            <span className="rounded-full bg-surface-muted px-2.5 py-1 text-muted">
+              Frete do pedido: <span className="font-semibold text-foreground">{formatCurrency(mlShippingCost)}</span>
+            </span>
+          )}
+        </div>
+      )}
 
       <form action={formAction} className="space-y-3 border-t border-border pt-3">
         <div>

@@ -205,6 +205,8 @@ export interface MlOrderItem {
   };
   quantity: number;
   unit_price: number;
+  // Comissão do Mercado Livre para esse item, já calculada pela API.
+  sale_fee?: number;
 }
 
 export interface MlOrder {
@@ -214,6 +216,11 @@ export interface MlOrder {
   order_items: MlOrderItem[];
   buyer?: {
     nickname?: string;
+  };
+  // Custo de envio é por pedido (não por item). Vem null quando o pedido
+  // ainda não tem frete calculado/atribuído.
+  shipping?: {
+    cost?: number | null;
   };
 }
 
@@ -263,7 +270,14 @@ export async function searchRecentOrders(sellerId: string, limit = 20): Promise<
  * entre o webhook e a sincronização manual (/orders/search).
  */
 export async function upsertPendingSalesFromOrder(order: MlOrder) {
+  const shippingCost =
+    order.shipping?.cost !== undefined && order.shipping?.cost !== null
+      ? order.shipping.cost.toString()
+      : null;
+
   for (const orderItem of order.order_items) {
+    const saleFee = orderItem.sale_fee !== undefined ? orderItem.sale_fee.toString() : null;
+
     await db
       .insert(pendingSales)
       .values({
@@ -272,6 +286,8 @@ export async function upsertPendingSalesFromOrder(order: MlOrder) {
         titleSnapshot: orderItem.item.title,
         quantity: orderItem.quantity,
         unitPriceSnapshot: orderItem.unit_price.toString(),
+        mlSaleFeeSnapshot: saleFee,
+        mlShippingCostSnapshot: shippingCost,
         orderDate: new Date(order.date_created),
         orderStatusMl: order.status,
         buyerNickname: order.buyer?.nickname ?? null,
@@ -283,6 +299,8 @@ export async function upsertPendingSalesFromOrder(order: MlOrder) {
           titleSnapshot: orderItem.item.title,
           quantity: orderItem.quantity,
           unitPriceSnapshot: orderItem.unit_price.toString(),
+          mlSaleFeeSnapshot: saleFee,
+          mlShippingCostSnapshot: shippingCost,
           orderDate: new Date(order.date_created),
           orderStatusMl: order.status,
           buyerNickname: order.buyer?.nickname ?? null,

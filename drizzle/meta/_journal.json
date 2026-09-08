@@ -36,6 +36,13 @@
       "when": 1788817332415,
       "tag": "0004_shocking_cable",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788828896787,
+      "tag": "0005_add_ml_fees_to_pending_sales",
+      "breakpoints": true
     }
   ]
 }

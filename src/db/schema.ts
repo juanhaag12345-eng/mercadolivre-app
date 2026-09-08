@@ -264,6 +264,14 @@ export const pendingSales = pgTable(
     titleSnapshot: text("title_snapshot").notNull(),
     quantity: integer("quantity").notNull().default(1),
     unitPriceSnapshot: numeric("unit_price_snapshot", { precision: 12, scale: 2 }).notNull(),
+    // Taxa de venda (comissão do Mercado Livre) cobrada nesse item do pedido —
+    // vem pronta na resposta da API (order_items[].sale_fee). Só para exibição
+    // na revisão, não entra no cálculo financeiro da venda confirmada (que usa
+    // a taxa cadastrada no produto interno).
+    mlSaleFeeSnapshot: numeric("ml_sale_fee_snapshot", { precision: 12, scale: 2 }),
+    // Custo de envio do pedido (order.shipping.cost) — é por pedido, não por
+    // item, então fica repetido nas linhas de pedidos com mais de um item.
+    mlShippingCostSnapshot: numeric("ml_shipping_cost_snapshot", { precision: 12, scale: 2 }),
     orderDate: timestamp("order_date", { withTimezone: true }).notNull(),
     orderStatusMl: text("order_status_ml").notNull(),
     buyerNickname: text("buyer_nickname"),
