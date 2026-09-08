@@ -217,11 +217,52 @@ export interface MlOrder {
   buyer?: {
     nickname?: string;
   };
-  // Custo de envio é por pedido (não por item). Vem null quando o pedido
-  // ainda não tem frete calculado/atribuído.
+  // A Order só traz o ID do envio (não existe mais "shipping.cost" nessa
+  // resposta, mesmo em pedidos antigos que pareciam ter esse campo). Para
+  // saber quanto o Mercado Livre efetivamente cobra do vendedor pelo frete
+  // — inclusive quando o comprador recebeu frete grátis — é preciso uma
+  // chamada separada a /shipments/$id/costs (ver fetchSellerShippingCost).
   shipping?: {
-    cost?: number | null;
+    id?: number;
   };
+}
+
+interface MlShipmentCosts {
+  senders?: Array<{ user_id: number; cost: number }>;
+}
+
+/**
+ * Busca, para um envio específico, o valor que o Mercado Livre realmente
+ * cobra do vendedor (campo "senders[].cost" do recurso /shipments/$id/costs).
+ * Isso é diferente do que o comprador paga: em pedidos com frete grátis o
+ * comprador paga 0, mas o vendedor pode ser cobrado do mesmo jeito — é
+ * justamente esse valor que queremos mostrar.
+ */
+async function fetchSellerShippingCost(
+  shipmentId: number,
+  accessToken: string,
+  sellerId?: string
+): Promise<number | null> {
+  const response = await fetch(`${ML_API_BASE}/shipments/${shipmentId}/costs`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "x-format-new": "true",
+    },
+  });
+  if (!response.ok) {
+    // Alguns envios ainda não têm custo calculado (ex.: acabaram de ser
+    // criados) — nesse caso simplesmente não mostramos o valor, sem quebrar
+    // o resto da sincronização.
+    return null;
+  }
+  const data = (await response.json()) as MlShipmentCosts;
+  const senders = data.senders ?? [];
+  if (senders.length === 0) return null;
+  const match = sellerId
+    ? senders.find((sender) => String(sender.user_id) === sellerId)
+    : undefined;
+  const cost = (match ?? senders[0]).cost;
+  return cost ?? null;
 }
 
 export async function fetchOrder(orderId: string | number): Promise<MlOrder> {
@@ -268,12 +309,30 @@ export async function searchRecentOrders(sellerId: string, limit = 20): Promise<
  * confirmação já feita caso o Mercado Livre reenvie a mesma notificação (ou
  * a sincronização manual rode de novo sobre o mesmo pedido). Compartilhada
  * entre o webhook e a sincronização manual (/orders/search).
+ *
+ * `ctx` permite ao chamador (a sincronização manual, que processa vários
+ * pedidos em sequência) reaproveitar o access_token e o ID do vendedor em
+ * vez de buscá-los de novo a cada pedido. Quando omitido, buscamos aqui
+ * mesmo (caso do webhook, que processa um pedido por vez).
  */
-export async function upsertPendingSalesFromOrder(order: MlOrder) {
-  const shippingCost =
-    order.shipping?.cost !== undefined && order.shipping?.cost !== null
-      ? order.shipping.cost.toString()
-      : null;
+export async function upsertPendingSalesFromOrder(
+  order: MlOrder,
+  ctx?: { accessToken?: string; sellerId?: string }
+) {
+  let shippingCost: string | null = null;
+  if (order.shipping?.id) {
+    try {
+      const accessToken = ctx?.accessToken ?? (await getValidAccessToken());
+      const sellerId = ctx?.sellerId ?? (await getConnectionStatus()).mlUserId;
+      const cost = await fetchSellerShippingCost(order.shipping.id, accessToken, sellerId);
+      shippingCost = cost !== null ? cost.toString() : null;
+    } catch {
+      // Se a consulta de custo de envio falhar (ex.: token expirado no meio
+      // do processo), seguimos sem esse dado — não é motivo para deixar a
+      // venda inteira de fora dos pendentes.
+      shippingCost = null;
+    }
+  }
 
   for (const orderItem of order.order_items) {
     const saleFee = orderItem.sale_fee !== undefined ? orderItem.sale_fee.toString() : null;

@@ -53,7 +53,7 @@ export function PendingSaleCard({ pending, products }: { pending: PendingSale; p
           )}
           {mlShippingCost !== null && (
             <span className="rounded-full bg-surface-muted px-2.5 py-1 text-muted">
-              Frete do pedido: <span className="font-semibold text-foreground">{formatCurrency(mlShippingCost)}</span>
+              Frete cobrado do vendedor: <span className="font-semibold text-foreground">{formatCurrency(mlShippingCost)}</span>
             </span>
           )}
         </div>

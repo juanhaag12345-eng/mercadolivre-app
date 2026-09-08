@@ -7,7 +7,12 @@ import { pendingSales, products, sales } from "@/db/schema";
 import { confirmPendingSaleSchema } from "@/lib/validations";
 import { toNumber } from "@/lib/calculations";
 import { getSettings } from "@/actions/settings";
-import { getConnectionStatus, searchRecentOrders, upsertPendingSalesFromOrder } from "@/lib/mercadolivre";
+import {
+  getConnectionStatus,
+  getValidAccessToken,
+  searchRecentOrders,
+  upsertPendingSalesFromOrder,
+} from "@/lib/mercadolivre";
 import type { ActionResult } from "@/actions/products";
 
 export { getConnectionStatus };
@@ -27,9 +32,13 @@ export async function syncRecentOrders(): Promise<{ ok: boolean; message: string
 
   try {
     const orders = await searchRecentOrders(status.mlUserId, 20);
+    // Busca o access_token uma única vez aqui e reaproveita em todos os
+    // pedidos do lote, em vez de cada upsertPendingSalesFromOrder buscar o
+    // seu (evita N idas ao banco só pra ler a mesma credencial).
+    const accessToken = await getValidAccessToken();
     let itemCount = 0;
     for (const order of orders) {
-      await upsertPendingSalesFromOrder(order);
+      await upsertPendingSalesFromOrder(order, { accessToken, sellerId: status.mlUserId });
       itemCount += order.order_items.length;
     }
 
