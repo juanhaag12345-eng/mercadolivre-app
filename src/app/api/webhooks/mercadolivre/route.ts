@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/db";
-import { pendingSales } from "@/db/schema";
-import { fetchOrder, type MlOrder } from "@/lib/mercadolivre";
+import { fetchOrder, upsertPendingSalesFromOrder } from "@/lib/mercadolivre";
 
 export const dynamic = "force-dynamic";
 
@@ -13,41 +11,6 @@ interface MlNotification {
   attempts?: number;
   sent?: string;
   received?: string;
-}
-
-// Guarda/atualiza uma linha de "venda pendente" por item do pedido. Usamos
-// onConflictDoUpdate só nos campos de exibição — nunca sobrescrevemos
-// status/matchedProductId/dispatchedBy/resultingSaleId, para não perder uma
-// confirmação já feita caso o Mercado Livre reenvie a mesma notificação.
-async function upsertPendingSalesFromOrder(order: MlOrder) {
-  for (const orderItem of order.order_items) {
-    await db
-      .insert(pendingSales)
-      .values({
-        mlOrderId: String(order.id),
-        mlOrderItemId: orderItem.item.id,
-        titleSnapshot: orderItem.item.title,
-        quantity: orderItem.quantity,
-        unitPriceSnapshot: orderItem.unit_price.toString(),
-        orderDate: new Date(order.date_created),
-        orderStatusMl: order.status,
-        buyerNickname: order.buyer?.nickname ?? null,
-        rawOrderPayload: order,
-      })
-      .onConflictDoUpdate({
-        target: [pendingSales.mlOrderId, pendingSales.mlOrderItemId],
-        set: {
-          titleSnapshot: orderItem.item.title,
-          quantity: orderItem.quantity,
-          unitPriceSnapshot: orderItem.unit_price.toString(),
-          orderDate: new Date(order.date_created),
-          orderStatusMl: order.status,
-          buyerNickname: order.buyer?.nickname ?? null,
-          rawOrderPayload: order,
-          updatedAt: new Date(),
-        },
-      });
-  }
 }
 
 // Healthcheck simples — só pra confirmar de fora que o endpoint está no ar e

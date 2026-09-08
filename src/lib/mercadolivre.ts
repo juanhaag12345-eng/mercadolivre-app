@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { mercadolivreCredentials } from "@/db/schema";
+import { mercadolivreCredentials, pendingSales } from "@/db/schema";
 
 const ML_API_BASE = "https://api.mercadolibre.com";
 const ML_AUTH_BASE = "https://auth.mercadolivre.com.br";
@@ -227,4 +227,68 @@ export async function fetchOrder(orderId: string | number): Promise<MlOrder> {
     throw new Error(`Falha ao buscar pedido ${orderId} (${response.status}): ${text}`);
   }
   return (await response.json()) as MlOrder;
+}
+
+/**
+ * Busca os pedidos mais recentes do vendedor direto na API do Mercado Livre
+ * (endpoint /orders/search), em vez de esperar o webhook. Serve como rede de
+ * segurança manual: se por algum motivo o Mercado Livre não chegar a enviar
+ * a notificação de uma venda (ex.: atraso de propagação logo após autorizar
+ * o app), essa busca ainda encontra o pedido.
+ */
+export async function searchRecentOrders(sellerId: string, limit = 20): Promise<MlOrder[]> {
+  const accessToken = await getValidAccessToken();
+  const url = new URL(`${ML_API_BASE}/orders/search`);
+  url.searchParams.set("seller", sellerId);
+  url.searchParams.set("sort", "date_desc");
+  url.searchParams.set("limit", String(limit));
+
+  const response = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Falha ao buscar pedidos recentes (${response.status}): ${text}`);
+  }
+  const body = (await response.json()) as { results: MlOrder[] };
+  return body.results;
+}
+
+/**
+ * Guarda/atualiza uma linha de "venda pendente" por item do pedido. Usamos
+ * onConflictDoUpdate só nos campos de exibição — nunca sobrescrevemos
+ * status/matchedProductId/dispatchedBy/resultingSaleId, para não perder uma
+ * confirmação já feita caso o Mercado Livre reenvie a mesma notificação (ou
+ * a sincronização manual rode de novo sobre o mesmo pedido). Compartilhada
+ * entre o webhook e a sincronização manual (/orders/search).
+ */
+export async function upsertPendingSalesFromOrder(order: MlOrder) {
+  for (const orderItem of order.order_items) {
+    await db
+      .insert(pendingSales)
+      .values({
+        mlOrderId: String(order.id),
+        mlOrderItemId: orderItem.item.id,
+        titleSnapshot: orderItem.item.title,
+        quantity: orderItem.quantity,
+        unitPriceSnapshot: orderItem.unit_price.toString(),
+        orderDate: new Date(order.date_created),
+        orderStatusMl: order.status,
+        buyerNickname: order.buyer?.nickname ?? null,
+        rawOrderPayload: order,
+      })
+      .onConflictDoUpdate({
+        target: [pendingSales.mlOrderId, pendingSales.mlOrderItemId],
+        set: {
+          titleSnapshot: orderItem.item.title,
+          quantity: orderItem.quantity,
+          unitPriceSnapshot: orderItem.unit_price.toString(),
+          orderDate: new Date(order.date_created),
+          orderStatusMl: order.status,
+          buyerNickname: order.buyer?.nickname ?? null,
+          rawOrderPayload: order,
+          updatedAt: new Date(),
+        },
+      });
+  }
 }

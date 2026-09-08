@@ -7,10 +7,48 @@ import { pendingSales, products, sales } from "@/db/schema";
 import { confirmPendingSaleSchema } from "@/lib/validations";
 import { toNumber } from "@/lib/calculations";
 import { getSettings } from "@/actions/settings";
-import { getConnectionStatus } from "@/lib/mercadolivre";
+import { getConnectionStatus, searchRecentOrders, upsertPendingSalesFromOrder } from "@/lib/mercadolivre";
 import type { ActionResult } from "@/actions/products";
 
 export { getConnectionStatus };
+
+/**
+ * Busca manualmente os pedidos mais recentes do vendedor direto na API do
+ * Mercado Livre e atualiza /pendentes — rede de segurança para o caso do
+ * webhook não ter recebido (ou ainda não receber) a notificação de uma
+ * venda nova. Idempotente: rodar de novo sobre os mesmos pedidos não
+ * duplica nem desfaz confirmações já feitas.
+ */
+export async function syncRecentOrders(): Promise<{ ok: boolean; message: string }> {
+  const status = await getConnectionStatus();
+  if (!status.connected || !status.mlUserId) {
+    return { ok: false, message: "Conecte a conta do Mercado Livre antes de sincronizar." };
+  }
+
+  try {
+    const orders = await searchRecentOrders(status.mlUserId, 20);
+    let itemCount = 0;
+    for (const order of orders) {
+      await upsertPendingSalesFromOrder(order);
+      itemCount += order.order_items.length;
+    }
+
+    revalidatePath("/pendentes");
+
+    if (orders.length === 0) {
+      return { ok: true, message: "Nenhum pedido encontrado na conta do Mercado Livre." };
+    }
+    return {
+      ok: true,
+      message: `${orders.length} pedido(s) verificado(s) (${itemCount} item(ns)). A lista abaixo já foi atualizada.`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error ? err.message : "Erro ao sincronizar com o Mercado Livre.",
+    };
+  }
+}
 
 export async function listPendingSales() {
   const rows = await db

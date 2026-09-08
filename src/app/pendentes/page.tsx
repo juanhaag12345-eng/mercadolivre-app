@@ -4,6 +4,7 @@ import { LinkButton } from "@/components/ui/Button";
 import { listProducts } from "@/actions/products";
 import { getConnectionStatus, listPendingSales } from "@/actions/mercadolivre";
 import { PendingSaleCard } from "@/components/pendentes/PendingSaleCard";
+import { SyncRecentOrdersButton } from "@/components/pendentes/SyncRecentOrdersButton";
 import { formatDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -69,9 +70,12 @@ export default async function PendentesPage(props: PageProps<"/pendentes">) {
             </p>
           </div>
         </div>
-        <LinkButton href="/api/mercadolivre/authorize" variant={connection.connected ? "outline" : "secondary"} size="md">
-          {connection.connected ? "Reconectar conta" : "Conectar conta do Mercado Livre"}
-        </LinkButton>
+        <div className="flex items-center gap-2">
+          {connection.connected && <SyncRecentOrdersButton />}
+          <LinkButton href="/api/mercadolivre/authorize" variant={connection.connected ? "outline" : "secondary"} size="md">
+            {connection.connected ? "Reconectar conta" : "Conectar conta do Mercado Livre"}
+          </LinkButton>
+        </div>
       </Card>
 
       {pendingSales.length === 0 ? (
