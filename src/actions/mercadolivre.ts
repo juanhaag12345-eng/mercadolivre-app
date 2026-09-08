@@ -11,17 +11,11 @@ import {
   getValidAccessToken,
   searchRecentOrders,
   upsertPendingSalesFromOrder,
+  SYNC_MIN_DATE,
 } from "@/lib/mercadolivre";
 import type { ActionResult } from "@/actions/products";
 
 export { getConnectionStatus };
-
-// A partir daqui o dashboard passou a ser alimentado só com dados reais do
-// Mercado Livre (título do anúncio, receita, tarifas e frete) em vez do
-// cadastro manual de produtos — pedido do usuário em 08/09/2026. Pedidos
-// anteriores a essa data continuam existindo no Mercado Livre, mas não
-// devem ser trazidos para /pendentes nessa reformulação.
-const SYNC_MIN_DATE = new Date("2026-09-01T00:00:00-03:00");
 
 /**
  * Busca manualmente os pedidos mais recentes do vendedor direto na API do

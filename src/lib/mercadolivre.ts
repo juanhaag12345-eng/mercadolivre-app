@@ -5,6 +5,17 @@ import { mercadolivreCredentials, pendingSales } from "@/db/schema";
 const ML_API_BASE = "https://api.mercadolibre.com";
 const ML_AUTH_BASE = "https://auth.mercadolivre.com.br";
 
+// A partir daqui o dashboard passou a ser alimentado só com dados reais do
+// Mercado Livre (título do anúncio, receita, tarifas e frete) em vez do
+// cadastro manual de produtos — pedido do usuário em 08/09/2026. Pedidos
+// anteriores a essa data continuam existindo no Mercado Livre, mas não
+// devem ser trazidos para /pendentes nessa reformulação. Aplicado aqui
+// dentro de upsertPendingSalesFromOrder (e não só na sincronização manual)
+// para que o webhook do Mercado Livre — que reenvia notificações de
+// qualquer pedido, inclusive antigos que mudaram de status — também
+// respeite o corte, e não reintroduza vendas antigas em /pendentes.
+export const SYNC_MIN_DATE = new Date("2026-09-01T00:00:00-03:00");
+
 // URL de callback cadastrada no aplicativo do Mercado Livre — precisa bater
 // exatamente com o que está configurado em "Minhas aplicações", senão a
 // troca do código de autorização por token falha.
@@ -362,6 +373,13 @@ export async function upsertPendingSalesFromOrder(
   order: MlOrder,
   ctx?: { accessToken?: string; sellerId?: string }
 ) {
+  if (new Date(order.date_created) < SYNC_MIN_DATE) {
+    // Pedido anterior ao corte de 01/09/2026 — ignorado mesmo se vier via
+    // webhook (ex.: reenvio do Mercado Livre por causa de uma mudança de
+    // status num pedido antigo).
+    return;
+  }
+
   let shippingCost: string | null = null;
   let buyerFullName: string | null = null;
   if (order.shipping?.id) {
