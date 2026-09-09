@@ -337,23 +337,56 @@ export async function fetchOrder(orderId: string | number): Promise<MlOrder> {
  * segurança manual: se por algum motivo o Mercado Livre não chegar a enviar
  * a notificação de uma venda (ex.: atraso de propagação logo após autorizar
  * o app), essa busca ainda encontra o pedido.
+ *
+ * Pagina automaticamente (mais recente primeiro) até encontrar um pedido
+ * anterior a `sinceDate` — em vez de trazer só uma página fixa de pedidos,
+ * o que antes fazia dias mais antigos (ex.: início de setembro) ficarem de
+ * fora sempre que o volume de vendas dos dias mais recentes já preenchia
+ * sozinho o limite de uma única página. `maxResults` é só uma trava de
+ * segurança contra um loop indevido, não um limite normal de uso.
  */
-export async function searchRecentOrders(sellerId: string, limit = 20): Promise<MlOrder[]> {
-  const accessToken = await getValidAccessToken();
-  const url = new URL(`${ML_API_BASE}/orders/search`);
-  url.searchParams.set("seller", sellerId);
-  url.searchParams.set("sort", "date_desc");
-  url.searchParams.set("limit", String(limit));
+export async function searchRecentOrders(
+  sellerId: string,
+  opts?: { sinceDate?: Date; maxResults?: number }
+): Promise<MlOrder[]> {
+  const sinceDate = opts?.sinceDate;
+  const maxResults = opts?.maxResults ?? 500;
+  const pageSize = 50;
 
-  const response = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`Falha ao buscar pedidos recentes (${response.status}): ${text}`);
+  const orders: MlOrder[] = [];
+  let offset = 0;
+
+  while (orders.length < maxResults) {
+    const accessToken = await getValidAccessToken();
+    const url = new URL(`${ML_API_BASE}/orders/search`);
+    url.searchParams.set("seller", sellerId);
+    url.searchParams.set("sort", "date_desc");
+    url.searchParams.set("limit", String(pageSize));
+    url.searchParams.set("offset", String(offset));
+
+    const response = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(`Falha ao buscar pedidos recentes (${response.status}): ${text}`);
+    }
+    const body = (await response.json()) as { results: MlOrder[] };
+    if (body.results.length === 0) break;
+
+    orders.push(...body.results);
+
+    // Como a busca vem ordenada da mais nova pra mais antiga, assim que o
+    // último pedido da página já é mais antigo que o corte, não precisa
+    // buscar mais páginas — todo o resto seria ainda mais antigo.
+    const oldestInPage = body.results[body.results.length - 1];
+    if (sinceDate && new Date(oldestInPage.date_created) < sinceDate) break;
+
+    if (body.results.length < pageSize) break; // última página
+    offset += body.results.length;
   }
-  const body = (await response.json()) as { results: MlOrder[] };
-  return body.results;
+
+  return sinceDate ? orders.filter((order) => new Date(order.date_created) >= sinceDate) : orders;
 }
 
 /**

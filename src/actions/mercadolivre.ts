@@ -32,8 +32,12 @@ export async function syncRecentOrders(): Promise<{ ok: boolean; message: string
   }
 
   try {
-    const allOrders = await searchRecentOrders(status.mlUserId, 20);
-    const orders = allOrders.filter((order) => new Date(order.date_created) >= SYNC_MIN_DATE);
+    // Pagina automaticamente pedidos do mais novo pro mais antigo até passar
+    // do corte de SYNC_MIN_DATE — antes essa busca trazia só uma página fixa
+    // de 20 pedidos, e em dias de mais movimento isso já cobria só os 1-2
+    // dias mais recentes, deixando pedidos mais antigos (ainda dentro do
+    // período válido) de fora dos pendentes.
+    const orders = await searchRecentOrders(status.mlUserId, { sinceDate: SYNC_MIN_DATE });
     // Busca o access_token uma única vez aqui e reaproveita em todos os
     // pedidos do lote, em vez de cada upsertPendingSalesFromOrder buscar o
     // seu (evita N idas ao banco só pra ler a mesma credencial).
@@ -46,13 +50,10 @@ export async function syncRecentOrders(): Promise<{ ok: boolean; message: string
 
     revalidatePath("/pendentes");
 
-    if (allOrders.length === 0) {
-      return { ok: true, message: "Nenhum pedido encontrado na conta do Mercado Livre." };
-    }
     if (orders.length === 0) {
       return {
         ok: true,
-        message: `${allOrders.length} pedido(s) encontrado(s), mas todos anteriores a 01/09/2026 — nenhum trazido para os pendentes.`,
+        message: "Nenhum pedido a partir de 01/09/2026 encontrado na conta do Mercado Livre.",
       };
     }
     return {
