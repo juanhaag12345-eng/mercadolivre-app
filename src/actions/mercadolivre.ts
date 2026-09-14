@@ -7,28 +7,31 @@ import { pendingSales, sales } from "@/db/schema";
 import { confirmPendingSaleSchema } from "@/lib/validations";
 import { getSettings } from "@/actions/settings";
 import {
-  getConnectionStatus,
-  getValidAccessToken,
+  listConnections,
+  getValidAccessTokenForAccount,
+  removeConnection,
   searchRecentOrders,
   upsertPendingSalesFromOrder,
   SYNC_MIN_DATE,
 } from "@/lib/mercadolivre";
 import type { ActionResult } from "@/actions/products";
 
-export { getConnectionStatus };
+export { listConnections };
 
 /**
- * Busca manualmente os pedidos mais recentes do vendedor direto na API do
- * Mercado Livre e atualiza /pendentes — rede de segurança para o caso do
- * webhook não ter recebido (ou ainda não receber) a notificação de uma
- * venda nova. Idempotente: rodar de novo sobre os mesmos pedidos não
+ * Busca manualmente os pedidos mais recentes de UMA conta específica direto
+ * na API do Mercado Livre e atualiza /pendentes — rede de segurança para o
+ * caso do webhook não ter recebido (ou ainda não receber) a notificação de
+ * uma venda nova. Idempotente: rodar de novo sobre os mesmos pedidos não
  * duplica nem desfaz confirmações já feitas. Ignora pedidos anteriores a
- * SYNC_MIN_DATE.
+ * SYNC_MIN_DATE. `accountId` é o id da linha em mercadolivre_credentials
+ * (cada conta conectada tem seu próprio botão "Buscar vendas recentes").
  */
-export async function syncRecentOrders(): Promise<{ ok: boolean; message: string }> {
-  const status = await getConnectionStatus();
-  if (!status.connected || !status.mlUserId) {
-    return { ok: false, message: "Conecte a conta do Mercado Livre antes de sincronizar." };
+export async function syncRecentOrders(accountId: string): Promise<{ ok: boolean; message: string }> {
+  const connections = await listConnections();
+  const connection = connections.find((c) => c.id === accountId);
+  if (!connection) {
+    return { ok: false, message: "Essa conta do Mercado Livre não está mais conectada." };
   }
 
   try {
@@ -37,14 +40,14 @@ export async function syncRecentOrders(): Promise<{ ok: boolean; message: string
     // de 20 pedidos, e em dias de mais movimento isso já cobria só os 1-2
     // dias mais recentes, deixando pedidos mais antigos (ainda dentro do
     // período válido) de fora dos pendentes.
-    const orders = await searchRecentOrders(status.mlUserId, { sinceDate: SYNC_MIN_DATE });
+    const orders = await searchRecentOrders(connection.mlUserId, { sinceDate: SYNC_MIN_DATE });
     // Busca o access_token uma única vez aqui e reaproveita em todos os
     // pedidos do lote, em vez de cada upsertPendingSalesFromOrder buscar o
     // seu (evita N idas ao banco só pra ler a mesma credencial).
-    const accessToken = await getValidAccessToken();
+    const accessToken = await getValidAccessTokenForAccount(connection.mlUserId);
     let itemCount = 0;
     for (const order of orders) {
-      await upsertPendingSalesFromOrder(order, { accessToken, sellerId: status.mlUserId });
+      await upsertPendingSalesFromOrder(order, { accessToken, sellerId: connection.mlUserId });
       itemCount += order.order_items.length;
     }
 
@@ -66,6 +69,16 @@ export async function syncRecentOrders(): Promise<{ ok: boolean; message: string
       message: err instanceof Error ? err.message : "Erro ao sincronizar com o Mercado Livre.",
     };
   }
+}
+
+/**
+ * Desconecta uma conta do Mercado Livre (botão de excluir, em /pendentes).
+ * As vendas já importadas/confirmadas continuam intactas — só a credencial
+ * dessa conta é removida.
+ */
+export async function removeMlAccount(accountId: string): Promise<void> {
+  await removeConnection(accountId);
+  revalidatePath("/pendentes");
 }
 
 export async function listPendingSales() {

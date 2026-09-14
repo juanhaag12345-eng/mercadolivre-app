@@ -5,7 +5,7 @@ import { Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { syncRecentOrders } from "@/actions/mercadolivre";
 
-export function SyncRecentOrdersButton() {
+export function SyncRecentOrdersButton({ accountId }: { accountId: string }) {
   const [isPending, startTransition] = useTransition();
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
 
@@ -19,7 +19,7 @@ export function SyncRecentOrdersButton() {
         onClick={() => {
           setResult(null);
           startTransition(() => {
-            syncRecentOrders().then(setResult);
+            syncRecentOrders(accountId).then(setResult);
           });
         }}
       >

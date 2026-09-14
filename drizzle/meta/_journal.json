@@ -57,6 +57,13 @@
       "when": 1788907809465,
       "tag": "0007_ml_sales_source_and_custo_manual",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789419210147,
+      "tag": "0008_ml_multi_account",
+      "breakpoints": true
     }
   ]
 }

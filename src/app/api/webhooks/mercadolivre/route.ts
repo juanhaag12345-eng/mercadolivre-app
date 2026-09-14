@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchOrder, upsertPendingSalesFromOrder } from "@/lib/mercadolivre";
+import { fetchOrder, getValidAccessTokenForAccount, upsertPendingSalesFromOrder } from "@/lib/mercadolivre";
 
 export const dynamic = "force-dynamic";
 
@@ -55,8 +55,13 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const order = await fetchOrder(orderId);
-    await upsertPendingSalesFromOrder(order);
+    // Cada notificação já vem com o user_id do vendedor a que pertence — com
+    // mais de uma conta conectada, é isso que diz de qual delas usar o
+    // token, já que não existe mais uma conta "padrão" única.
+    const sellerId = String(notification.user_id);
+    const accessToken = await getValidAccessTokenForAccount(sellerId);
+    const order = await fetchOrder(orderId, accessToken);
+    await upsertPendingSalesFromOrder(order, { accessToken, sellerId });
     console.log(
       `[webhook ML] pedido ${orderId} processado com sucesso (${order.order_items.length} item(ns))`
     );

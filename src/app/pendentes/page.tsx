@@ -1,9 +1,10 @@
-import { AlertTriangle, CheckCircle2, Inbox, Plug, Unplug } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Inbox, Plug, Plus, Unplug } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { LinkButton } from "@/components/ui/Button";
-import { getConnectionStatus, listPendingSales } from "@/actions/mercadolivre";
+import { listConnections, listPendingSales } from "@/actions/mercadolivre";
 import { PendingSaleCard } from "@/components/pendentes/PendingSaleCard";
 import { SyncRecentOrdersButton } from "@/components/pendentes/SyncRecentOrdersButton";
+import { RemoveMlAccountButton } from "@/components/pendentes/RemoveMlAccountButton";
 import { formatDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -18,8 +19,8 @@ export default async function PendentesPage(props: PageProps<"/pendentes">) {
   const conectado = searchParams.ml_conectado === "1";
   const erro = typeof searchParams.ml_erro === "string" ? searchParams.ml_erro : undefined;
 
-  const [connection, pendingSales] = await Promise.all([
-    getConnectionStatus(),
+  const [connections, pendingSales] = await Promise.all([
+    listConnections(),
     listPendingSales(),
   ]);
 
@@ -46,35 +47,63 @@ export default async function PendentesPage(props: PageProps<"/pendentes">) {
         </div>
       )}
 
-      <Card className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <span
-            className={`flex h-10 w-10 items-center justify-center rounded-xl ${
-              connection.connected ? "bg-success-soft text-success" : "bg-surface-muted text-muted"
-            }`}
+      <div className="mb-6 space-y-3">
+        {connections.length === 0 ? (
+          <Card className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-surface-muted text-muted">
+                <Unplug size={18} />
+              </span>
+              <div>
+                <p className="text-sm font-semibold">Nenhuma conta do Mercado Livre conectada</p>
+                <p className="text-xs text-muted">
+                  Conecte a conta vendedora para receber vendas automaticamente.
+                </p>
+              </div>
+            </div>
+            <LinkButton href="/api/mercadolivre/authorize" variant="secondary" size="md">
+              Conectar conta do Mercado Livre
+            </LinkButton>
+          </Card>
+        ) : (
+          connections.map((connection) => (
+            <Card
+              key={connection.id}
+              className="flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+            >
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-success-soft text-success">
+                  <Plug size={18} />
+                </span>
+                <div>
+                  <p className="text-sm font-semibold">
+                    {connection.nickname ?? "Conta do Mercado Livre conectada"}
+                  </p>
+                  <p className="text-xs text-muted">
+                    Vendedor {connection.mlUserId} · sessão válida até {formatDate(connection.expiresAt)}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <SyncRecentOrdersButton accountId={connection.id} />
+                <RemoveMlAccountButton accountId={connection.id} />
+              </div>
+            </Card>
+          ))
+        )}
+
+        {connections.length > 0 && (
+          <LinkButton
+            href="/api/mercadolivre/authorize"
+            variant="outline"
+            size="md"
+            className="w-full sm:w-auto"
           >
-            {connection.connected ? <Plug size={18} /> : <Unplug size={18} />}
-          </span>
-          <div>
-            <p className="text-sm font-semibold">
-              {connection.connected ? "Conta do Mercado Livre conectada" : "Conta do Mercado Livre não conectada"}
-            </p>
-            <p className="text-xs text-muted">
-              {connection.connected
-                ? `Vendedor ${connection.mlUserId} · sessão válida até ${
-                    connection.expiresAt ? formatDate(connection.expiresAt) : "—"
-                  }`
-                : "Conecte a conta vendedora para receber vendas automaticamente."}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {connection.connected && <SyncRecentOrdersButton />}
-          <LinkButton href="/api/mercadolivre/authorize" variant={connection.connected ? "outline" : "secondary"} size="md">
-            {connection.connected ? "Reconectar conta" : "Conectar conta do Mercado Livre"}
+            <Plus size={16} />
+            Adicionar outra conta
           </LinkButton>
-        </div>
-      </Card>
+        )}
+      </div>
 
       {pendingSales.length === 0 ? (
         <Card className="flex flex-col items-center justify-center gap-2 py-12 text-center">

@@ -261,24 +261,37 @@ export const settings = pgTable("settings", {
 
 // --- Integração com o Mercado Livre ---
 
-// Credenciais OAuth da conta vendedora conectada (linha única, id fixo
-// "default"). O access_token dura ~6h; guardamos o refresh_token (que é
+// Credenciais OAuth das contas vendedoras conectadas — uma linha por conta
+// (o mesmo app pode ser autorizado por várias contas vendedoras diferentes,
+// permitindo conectar mais de um vendedor do Mercado Livre ao mesmo
+// aplicativo). O access_token dura ~6h; guardamos o refresh_token (que é
 // rotativo — a cada uso o Mercado Livre devolve um novo) para renovar
-// automaticamente sem precisar que alguém logue de novo.
-export const mercadolivreCredentials = pgTable("mercadolivre_credentials", {
-  id: text("id").primaryKey().default("default"),
-  mlUserId: text("ml_user_id").notNull(),
-  accessToken: text("access_token").notNull(),
-  refreshToken: text("refresh_token").notNull(),
-  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  scope: text("scope"),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+// automaticamente sem precisar que alguém logue de novo. mlUserId é único:
+// reconectar a mesma conta atualiza a linha existente em vez de duplicar.
+export const mercadolivreCredentials = pgTable(
+  "mercadolivre_credentials",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    mlUserId: text("ml_user_id").notNull(),
+    // Rótulo opcional pra distinguir as contas na tela de pendentes (ex.:
+    // "Loja principal", "Loja do Djow"). Sem rótulo, mostramos só o ID do
+    // vendedor.
+    nickname: text("nickname"),
+    accessToken: text("access_token").notNull(),
+    refreshToken: text("refresh_token").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    scope: text("scope"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    unique("mercadolivre_credentials_ml_user_id_unique").on(table.mlUserId),
+  ]
+);
 
 // Status de uma venda importada do Mercado Livre, aguardando revisão manual
 // antes de virar uma venda "de verdade" no sistema.

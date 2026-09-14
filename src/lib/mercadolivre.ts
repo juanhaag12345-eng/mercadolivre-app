@@ -69,7 +69,6 @@ async function storeTokenResponse(token: TokenResponse) {
   await db
     .insert(mercadolivreCredentials)
     .values({
-      id: "default",
       mlUserId: String(token.user_id),
       accessToken: token.access_token,
       refreshToken: token.refresh_token ?? "",
@@ -77,9 +76,12 @@ async function storeTokenResponse(token: TokenResponse) {
       scope: token.scope,
     })
     .onConflictDoUpdate({
-      target: mercadolivreCredentials.id,
+      // mlUserId é único: reconectar a mesma conta (reautorizar) atualiza a
+      // linha já existente em vez de criar uma segunda — cada conta nova
+      // (mlUserId diferente) vira uma linha própria, o que é o que permite
+      // conectar mais de uma conta vendedora ao mesmo tempo.
+      target: mercadolivreCredentials.mlUserId,
       set: {
-        mlUserId: String(token.user_id),
         accessToken: token.access_token,
         // O refresh_token é rotativo — o Mercado Livre nem sempre devolve um
         // novo (ex: fluxos futuros podem omitir), então só sobrescrevemos
@@ -149,21 +151,39 @@ async function refreshAccessToken(refreshToken: string): Promise<void> {
   await storeTokenResponse(token);
 }
 
-export interface MlConnectionStatus {
-  connected: boolean;
-  mlUserId?: string;
-  expiresAt?: Date;
+export interface MlConnection {
+  id: string;
+  mlUserId: string;
+  nickname: string | null;
+  expiresAt: Date;
 }
 
-export async function getConnectionStatus(): Promise<MlConnectionStatus> {
+/**
+ * Lista todas as contas do Mercado Livre conectadas (uma por vendedor
+ * autorizado). Substitui a antiga getConnectionStatus() de conta única —
+ * agora pode haver zero, uma ou várias contas conectadas ao mesmo tempo.
+ */
+export async function listConnections(): Promise<MlConnection[]> {
   const rows = await db
     .select()
     .from(mercadolivreCredentials)
-    .where(eq(mercadolivreCredentials.id, "default"))
-    .limit(1);
-  const row = rows[0];
-  if (!row) return { connected: false };
-  return { connected: true, mlUserId: row.mlUserId, expiresAt: row.expiresAt };
+    .orderBy(mercadolivreCredentials.createdAt);
+  return rows.map((row) => ({
+    id: row.id,
+    mlUserId: row.mlUserId,
+    nickname: row.nickname,
+    expiresAt: row.expiresAt,
+  }));
+}
+
+/**
+ * Remove uma conta conectada (desconecta). As vendas já importadas para
+ * /pendentes ou já confirmadas permanecem intactas — só a credencial é
+ * apagada, então essa conta para de sincronizar/receber webhooks até ser
+ * conectada de novo.
+ */
+export async function removeConnection(id: string): Promise<void> {
+  await db.delete(mercadolivreCredentials).where(eq(mercadolivreCredentials.id, id));
 }
 
 // Margem de segurança antes do vencimento real do access_token, para nunca
@@ -171,21 +191,21 @@ export async function getConnectionStatus(): Promise<MlConnectionStatus> {
 const EXPIRY_BUFFER_MS = 2 * 60 * 1000;
 
 /**
- * Retorna um access_token válido para chamar a API do Mercado Livre,
+ * Retorna um access_token válido para a conta do vendedor `mlUserId`,
  * renovando automaticamente via refresh_token quando necessário. Lança um
- * erro claro se a conta ainda não foi conectada.
+ * erro claro se essa conta não estiver conectada.
  */
-export async function getValidAccessToken(): Promise<string> {
+export async function getValidAccessTokenForAccount(mlUserId: string): Promise<string> {
   const rows = await db
     .select()
     .from(mercadolivreCredentials)
-    .where(eq(mercadolivreCredentials.id, "default"))
+    .where(eq(mercadolivreCredentials.mlUserId, mlUserId))
     .limit(1);
   const row = rows[0];
 
   if (!row) {
     throw new Error(
-      "Conta do Mercado Livre ainda não conectada. Conecte em /pendentes."
+      `Conta do Mercado Livre ${mlUserId} não está conectada. Conecte em /pendentes.`
     );
   }
 
@@ -199,7 +219,7 @@ export async function getValidAccessToken(): Promise<string> {
   const refreshed = await db
     .select()
     .from(mercadolivreCredentials)
-    .where(eq(mercadolivreCredentials.id, "default"))
+    .where(eq(mercadolivreCredentials.mlUserId, mlUserId))
     .limit(1);
   if (!refreshed[0]) {
     throw new Error("Falha ao renovar token do Mercado Livre.");
@@ -319,8 +339,7 @@ async function fetchReceiverName(
   return data.destination?.receiver_name ?? null;
 }
 
-export async function fetchOrder(orderId: string | number): Promise<MlOrder> {
-  const accessToken = await getValidAccessToken();
+export async function fetchOrder(orderId: string | number, accessToken: string): Promise<MlOrder> {
   const response = await fetch(`${ML_API_BASE}/orders/${orderId}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -357,7 +376,7 @@ export async function searchRecentOrders(
   let offset = 0;
 
   while (orders.length < maxResults) {
-    const accessToken = await getValidAccessToken();
+    const accessToken = await getValidAccessTokenForAccount(sellerId);
     const url = new URL(`${ML_API_BASE}/orders/search`);
     url.searchParams.set("seller", sellerId);
     url.searchParams.set("sort", "date_desc");
@@ -397,14 +416,15 @@ export async function searchRecentOrders(
  * a sincronização manual rode de novo sobre o mesmo pedido). Compartilhada
  * entre o webhook e a sincronização manual (/orders/search).
  *
- * `ctx` permite ao chamador (a sincronização manual, que processa vários
- * pedidos em sequência) reaproveitar o access_token e o ID do vendedor em
- * vez de buscá-los de novo a cada pedido. Quando omitido, buscamos aqui
- * mesmo (caso do webhook, que processa um pedido por vez).
+ * `ctx` é obrigatório: com mais de uma conta conectada não existe mais um
+ * único token/vendedor "padrão" para usar como fallback implícito — todo
+ * chamador (webhook, sincronização manual) precisa resolver antes qual
+ * conta esse pedido pertence e passar o access_token e o ID do vendedor
+ * dessa conta especificamente.
  */
 export async function upsertPendingSalesFromOrder(
   order: MlOrder,
-  ctx?: { accessToken?: string; sellerId?: string }
+  ctx: { accessToken: string; sellerId: string }
 ) {
   if (new Date(order.date_created) < SYNC_MIN_DATE) {
     // Pedido anterior ao corte de 01/09/2026 — ignorado mesmo se vier via
@@ -417,11 +437,9 @@ export async function upsertPendingSalesFromOrder(
   let buyerFullName: string | null = null;
   if (order.shipping?.id) {
     try {
-      const accessToken = ctx?.accessToken ?? (await getValidAccessToken());
-      const sellerId = ctx?.sellerId ?? (await getConnectionStatus()).mlUserId;
-      const cost = await fetchSellerShippingCost(order.shipping.id, accessToken, sellerId);
+      const cost = await fetchSellerShippingCost(order.shipping.id, ctx.accessToken, ctx.sellerId);
       shippingCost = cost !== null ? cost.toString() : null;
-      buyerFullName = await fetchReceiverName(order.shipping.id, accessToken);
+      buyerFullName = await fetchReceiverName(order.shipping.id, ctx.accessToken);
     } catch {
       // Se a consulta de custo de envio/nome do destinatário falhar (ex.:
       // token expirado no meio do processo), seguimos sem esse dado — não é

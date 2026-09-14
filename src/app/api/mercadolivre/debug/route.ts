@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getValidAccessToken } from "@/lib/mercadolivre";
+import { getValidAccessTokenForAccount, listConnections } from "@/lib/mercadolivre";
 
 export const dynamic = "force-dynamic";
 
@@ -26,9 +26,24 @@ const ML_APP_ID = "8549699768586111";
 // são expostos ali por privacidade).
 //
 // Não expõe nenhum segredo (o access_token nunca sai daqui).
+//
+// Com duas (ou mais) contas conectadas, use ?mlUserId=... para escolher de
+// qual conta consultar; sem esse parâmetro, usa a primeira conta conectada.
 export async function GET(request: NextRequest) {
   try {
-    const accessToken = await getValidAccessToken();
+    const mlUserIdParam = request.nextUrl.searchParams.get("mlUserId");
+    let mlUserId = mlUserIdParam;
+    if (!mlUserId) {
+      const connections = await listConnections();
+      mlUserId = connections[0]?.mlUserId ?? null;
+    }
+    if (!mlUserId) {
+      return NextResponse.json(
+        { error: "Nenhuma conta do Mercado Livre conectada." },
+        { status: 400 }
+      );
+    }
+    const accessToken = await getValidAccessTokenForAccount(mlUserId);
     const orderId = request.nextUrl.searchParams.get("orderId");
     const shipmentId = request.nextUrl.searchParams.get("shipmentId");
     const wantAddress = request.nextUrl.searchParams.get("address") === "1";
