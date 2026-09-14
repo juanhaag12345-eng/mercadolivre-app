@@ -1,0 +1,35 @@
+From 7f19662e7a47c2d03ddcd4f325fcb835a2bba261 Mon Sep 17 00:00:00 2001
+From: Juan <juanhaag12345@gmail.com>
+Date: Mon, 14 Sep 2026 23:09:44 +0000
+Subject: [PATCH] Corrige migracao 0008: remove DEFAULT antes de trocar tipo da
+ coluna id
+
+O Postgres recusa converter automaticamente um DEFAULT em texto ('default')
+para uuid (erro 42804: "default for column id cannot be cast automatically
+to type uuid"), o que derrubou o deploy no Railway (pre-deploy command
+falhou). Corrigido removendo o DEFAULT antes do ALTER COLUMN ... SET DATA
+TYPE uuid, e recriando o default (gen_random_uuid()) logo em seguida.
+---
+ drizzle/0008_ml_multi_account.sql | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/drizzle/0008_ml_multi_account.sql b/drizzle/0008_ml_multi_account.sql
+index bc47f46..264c163 100644
+--- a/drizzle/0008_ml_multi_account.sql
++++ b/drizzle/0008_ml_multi_account.sql
+@@ -4,6 +4,12 @@
+ -- ALTER COLUMN ... SET DATA TYPE uuid abaixo falharia contra o banco de
+ -- produção, que já tem essa linha.
+ UPDATE "mercadolivre_credentials" SET "id" = gen_random_uuid()::text WHERE "id" = 'default';--> statement-breakpoint
++-- A coluna tem um DEFAULT em texto ('default'), e o Postgres se recusa a
++-- converter esse default automaticamente pro tipo uuid (erro 42804: "default
++-- for column id cannot be cast automatically to type uuid"). Por isso
++-- removemos o default antes de trocar o tipo, e recriamos ele depois já como
++-- gen_random_uuid().
++ALTER TABLE "mercadolivre_credentials" ALTER COLUMN "id" DROP DEFAULT;--> statement-breakpoint
+ ALTER TABLE "mercadolivre_credentials" ALTER COLUMN "id" SET DATA TYPE uuid USING "id"::uuid;--> statement-breakpoint
+ ALTER TABLE "mercadolivre_credentials" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();--> statement-breakpoint
+ ALTER TABLE "mercadolivre_credentials" ADD COLUMN "nickname" text;--> statement-breakpoint
+-- 
+2.43.0
+
