@@ -142,6 +142,7 @@ export async function confirmPendingSale(
       source: "mercadolivre",
       productNameSnapshot: pending.titleSnapshot,
       mlOrderId: pending.mlOrderId,
+      mlSellerId: pending.mlSellerId,
       mlPackId: pending.mlPackId,
       buyerNickname: pending.buyerNickname,
       buyerFullName: pending.buyerFullName,

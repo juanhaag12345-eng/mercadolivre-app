@@ -1,0 +1,70 @@
+import { Wallet } from "lucide-react";
+import { Card } from "@/components/ui/Card";
+import { listLiberacoes } from "@/actions/liberacoes";
+import { listConnections } from "@/actions/mercadolivre";
+import { LiberacaoCard } from "@/components/liberacoes/LiberacaoCard";
+import { AtualizarLiberacoesButton } from "@/components/liberacoes/AtualizarLiberacoesButton";
+import { formatCurrency } from "@/lib/format";
+
+export const dynamic = "force-dynamic";
+
+export default async function LiberacoesPage() {
+  const [sales, connections] = await Promise.all([listLiberacoes(), listConnections()]);
+
+  const accountLabelByMlUserId = new Map(
+    connections.map((c) => [c.mlUserId, c.nickname ?? `Vendedor ${c.mlUserId}`])
+  );
+
+  const total = sales.reduce((sum, s) => sum + s.netAmount, 0);
+
+  return (
+    <div className="p-4 md:p-8 max-w-3xl mx-auto animate-in">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl font-bold">Liberações pendentes</h1>
+          <p className="text-sm text-muted mt-0.5">
+            Vendas do Mercado Livre cujo dinheiro ainda não caiu na conta — atualize para consultar a previsão de
+            liberação de cada uma.
+          </p>
+        </div>
+        <AtualizarLiberacoesButton />
+      </div>
+
+      <Card className="flex items-center justify-between gap-4 mb-6">
+        <div className="flex items-center gap-3">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-success-soft text-success">
+            <Wallet size={18} />
+          </span>
+          <div>
+            <p className="text-sm font-semibold">{sales.length} venda(s) pendente(s) de liberação</p>
+            <p className="text-xs text-muted">Soma do valor líquido a cair na conta</p>
+          </div>
+        </div>
+        <p className="text-xl font-bold text-success">{formatCurrency(total)}</p>
+      </Card>
+
+      {sales.length === 0 ? (
+        <Card className="flex flex-col items-center justify-center gap-2 py-12 text-center">
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-muted text-muted">
+            <Wallet size={22} />
+          </span>
+          <p className="font-semibold text-sm">Nenhuma venda pendente de liberação</p>
+          <p className="text-xs text-muted max-w-sm">
+            Todas as vendas confirmadas do Mercado Livre já foram liberadas na conta (ou ainda não foram verificadas
+            — clique em &ldquo;Atualizar liberações&rdquo;).
+          </p>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {sales.map((sale) => (
+            <LiberacaoCard
+              key={sale.id}
+              sale={sale}
+              accountLabel={sale.mlSellerId ? (accountLabelByMlUserId.get(sale.mlSellerId) ?? null) : null}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

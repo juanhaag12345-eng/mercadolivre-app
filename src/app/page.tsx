@@ -1,9 +1,10 @@
 import Link from "next/link";
-import { ArrowRight, Clock, CreditCard, DollarSign, Percent, Receipt, ShoppingBag, Truck } from "lucide-react";
+import { ArrowRight, Clock, CreditCard, DollarSign, Percent, Receipt, ShoppingBag, Truck, Wallet } from "lucide-react";
 import { getSalesForRange } from "@/actions/sales";
 import { getMonthlyGoal } from "@/actions/goals";
 import { getSettings } from "@/actions/settings";
 import { listProducts } from "@/actions/products";
+import { getPendingReleaseSummary } from "@/actions/liberacoes";
 import { DashboardFilterBar } from "@/components/dashboard/DashboardFilterBar";
 import { FeeCard } from "@/components/dashboard/FeeCard";
 import { GoalCard } from "@/components/dashboard/GoalCard";
@@ -41,14 +42,16 @@ export default async function DashboardPage(props: PageProps<"/">) {
 
   const prevPeriod = from && to ? previousPeriod(from, to) : null;
 
-  const [goal, products, currentSales, goalMonthSales, partnerSettings, previousSales] = await Promise.all([
-    getMonthlyGoal(yearMonth),
-    listProducts(),
-    getSalesForRange(from, to, productId),
-    getSalesForRange(goalFrom, goalTo),
-    getSettings(),
-    prevPeriod ? getSalesForRange(prevPeriod.from, prevPeriod.to, productId) : Promise.resolve([]),
-  ]);
+  const [goal, products, currentSales, goalMonthSales, partnerSettings, previousSales, pendingRelease] =
+    await Promise.all([
+      getMonthlyGoal(yearMonth),
+      listProducts(),
+      getSalesForRange(from, to, productId),
+      getSalesForRange(goalFrom, goalTo),
+      getSettings(),
+      prevPeriod ? getSalesForRange(prevPeriod.from, prevPeriod.to, productId) : Promise.resolve([]),
+      getPendingReleaseSummary(),
+    ]);
 
   const totals = currentSales.reduce(
     (acc, s) => {
@@ -217,6 +220,12 @@ export default async function DashboardPage(props: PageProps<"/">) {
         />
         <StatCard label="Margem média" value={formatPercent(avgMargin)} icon={Percent} />
         <StatCard label="Pedidos pendentes" value={String(totals.pending)} icon={Truck} tone={totals.pending > 0 ? "danger" : "neutral"} />
+        <StatCard
+          label={`Valor a liberar (${pendingRelease.count} venda${pendingRelease.count === 1 ? "" : "s"})`}
+          value={formatCurrency(pendingRelease.total)}
+          icon={Wallet}
+          tone={pendingRelease.count > 0 ? "success" : "neutral"}
+        />
         <div className="md:col-span-2">
           <FeeCard
             label="Taxa de envio"

@@ -64,6 +64,13 @@
       "when": 1789419210147,
       "tag": "0008_ml_multi_account",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789428994905,
+      "tag": "0009_money_release_liberacoes",
+      "breakpoints": true
     }
   ]
 }

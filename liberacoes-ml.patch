@@ -1,0 +1,1518 @@
+From 714e420a28f94c447e20c9ac41920b35529ff0b9 Mon Sep 17 00:00:00 2001
+From: Juan <juan@example.com>
+Date: Mon, 14 Sep 2026 23:37:37 +0000
+Subject: [PATCH] Adiciona liberacoes: acompanhamento de pagamentos pendentes
+ do Mercado Livre
+
+- Rastreia de qual conta (mlSellerId) cada venda/pendente veio, necessario
+  pra saber qual access_token usar ao consultar liberacao de pagamento.
+- Novo card no dashboard com o total liquido pendente de cair na conta.
+- Nova aba /liberacoes: lista cada venda pendente de liberacao em detalhe
+  (receita, tarifa, frete, valor liquido, previsao de liberacao), com botao
+  pra atualizar consultando a API de billing do Mercado Livre.
+---
+ drizzle/0009_money_release_liberacoes.sql     |   6 +
+ drizzle/meta/0009_snapshot.json               | 844 ++++++++++++++++++
+ drizzle/meta/_journal.json                    |   7 +
+ src/actions/liberacoes.ts                     | 134 +++
+ src/actions/mercadolivre.ts                   |   1 +
+ src/app/liberacoes/page.tsx                   |  70 ++
+ src/app/page.tsx                              |  27 +-
+ .../liberacoes/AtualizarLiberacoesButton.tsx  |  36 +
+ src/components/liberacoes/LiberacaoCard.tsx   |  79 ++
+ src/components/nav/NavLinks.tsx               |   3 +-
+ src/db/schema.ts                              |  22 +
+ src/lib/mercadolivre.ts                       | 101 +++
+ 12 files changed, 1320 insertions(+), 10 deletions(-)
+ create mode 100644 drizzle/0009_money_release_liberacoes.sql
+ create mode 100644 drizzle/meta/0009_snapshot.json
+ create mode 100644 src/actions/liberacoes.ts
+ create mode 100644 src/app/liberacoes/page.tsx
+ create mode 100644 src/components/liberacoes/AtualizarLiberacoesButton.tsx
+ create mode 100644 src/components/liberacoes/LiberacaoCard.tsx
+
+diff --git a/drizzle/0009_money_release_liberacoes.sql b/drizzle/0009_money_release_liberacoes.sql
+new file mode 100644
+index 0000000..bc1a2eb
+--- /dev/null
++++ b/drizzle/0009_money_release_liberacoes.sql
+@@ -0,0 +1,6 @@
++ALTER TABLE "pending_sales" ADD COLUMN "ml_seller_id" text;--> statement-breakpoint
++ALTER TABLE "sales" ADD COLUMN "ml_seller_id" text;--> statement-breakpoint
++ALTER TABLE "sales" ADD COLUMN "money_release_date" timestamp with time zone;--> statement-breakpoint
++ALTER TABLE "sales" ADD COLUMN "money_release_status" text;--> statement-breakpoint
++ALTER TABLE "sales" ADD COLUMN "money_release_checked_at" timestamp with time zone;--> statement-breakpoint
++CREATE INDEX "sales_money_release_status_idx" ON "sales" USING btree ("money_release_status");
+\ No newline at end of file
+diff --git a/drizzle/meta/0009_snapshot.json b/drizzle/meta/0009_snapshot.json
+new file mode 100644
+index 0000000..8bcc635
+--- /dev/null
++++ b/drizzle/meta/0009_snapshot.json
+@@ -0,0 +1,844 @@
++{
++  "id": "3e1efdd5-2138-46bc-a2ba-657e67b3e425",
++  "prevId": "4e6fd032-687c-44f7-8d02-599ac415addb",
++  "version": "7",
++  "dialect": "postgresql",
++  "tables": {
++    "public.mercadolivre_credentials": {
++      "name": "mercadolivre_credentials",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "ml_user_id": {
++          "name": "ml_user_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "nickname": {
++          "name": "nickname",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "access_token": {
++          "name": "access_token",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "refresh_token": {
++          "name": "refresh_token",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "expires_at": {
++          "name": "expires_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "scope": {
++          "name": "scope",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {},
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "mercadolivre_credentials_ml_user_id_unique": {
++          "name": "mercadolivre_credentials_ml_user_id_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "ml_user_id"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.monthly_goals": {
++      "name": "monthly_goals",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "year_month": {
++          "name": "year_month",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "goal_value": {
++          "name": "goal_value",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {},
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "monthly_goals_year_month_unique": {
++          "name": "monthly_goals_year_month_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "year_month"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.pending_sales": {
++      "name": "pending_sales",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "ml_order_id": {
++          "name": "ml_order_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_order_item_id": {
++          "name": "ml_order_item_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_seller_id": {
++          "name": "ml_seller_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_pack_id": {
++          "name": "ml_pack_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "title_snapshot": {
++          "name": "title_snapshot",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "quantity": {
++          "name": "quantity",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true,
++          "default": 1
++        },
++        "unit_price_snapshot": {
++          "name": "unit_price_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_sale_fee_snapshot": {
++          "name": "ml_sale_fee_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_shipping_cost_snapshot": {
++          "name": "ml_shipping_cost_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "order_date": {
++          "name": "order_date",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "order_status_ml": {
++          "name": "order_status_ml",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "buyer_nickname": {
++          "name": "buyer_nickname",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "buyer_full_name": {
++          "name": "buyer_full_name",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "raw_order_payload": {
++          "name": "raw_order_payload",
++          "type": "jsonb",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "status": {
++          "name": "status",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'pendente'"
++        },
++        "matched_product_id": {
++          "name": "matched_product_id",
++          "type": "uuid",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "product_cost_manual": {
++          "name": "product_cost_manual",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "dispatched_by": {
++          "name": "dispatched_by",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "resulting_sale_id": {
++          "name": "resulting_sale_id",
++          "type": "uuid",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {
++        "pending_sales_status_idx": {
++          "name": "pending_sales_status_idx",
++          "columns": [
++            {
++              "expression": "status",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        }
++      },
++      "foreignKeys": {
++        "pending_sales_matched_product_id_products_id_fk": {
++          "name": "pending_sales_matched_product_id_products_id_fk",
++          "tableFrom": "pending_sales",
++          "tableTo": "products",
++          "columnsFrom": [
++            "matched_product_id"
++          ],
++          "columnsTo": [
++            "id"
++          ],
++          "onDelete": "set null",
++          "onUpdate": "no action"
++        },
++        "pending_sales_resulting_sale_id_sales_id_fk": {
++          "name": "pending_sales_resulting_sale_id_sales_id_fk",
++          "tableFrom": "pending_sales",
++          "tableTo": "sales",
++          "columnsFrom": [
++            "resulting_sale_id"
++          ],
++          "columnsTo": [
++            "id"
++          ],
++          "onDelete": "set null",
++          "onUpdate": "no action"
++        }
++      },
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "pending_sales_order_item_unique": {
++          "name": "pending_sales_order_item_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "ml_order_id",
++            "ml_order_item_id"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.products": {
++      "name": "products",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "internal_code": {
++          "name": "internal_code",
++          "type": "serial",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "name": {
++          "name": "name",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "image_url": {
++          "name": "image_url",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "is_kit": {
++          "name": "is_kit",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true,
++          "default": false
++        },
++        "kit_quantity": {
++          "name": "kit_quantity",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true,
++          "default": 1
++        },
++        "unit_price": {
++          "name": "unit_price",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "sale_fee_type": {
++          "name": "sale_fee_type",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'percentual'"
++        },
++        "sale_fee_value": {
++          "name": "sale_fee_value",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "free_shipping": {
++          "name": "free_shipping",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true,
++          "default": false
++        },
++        "shipping_cost": {
++          "name": "shipping_cost",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "packaging_cost": {
++          "name": "packaging_cost",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "product_cost": {
++          "name": "product_cost",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "active": {
++          "name": "active",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true,
++          "default": true
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {
++        "products_name_idx": {
++          "name": "products_name_idx",
++          "columns": [
++            {
++              "expression": "name",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        }
++      },
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "products_internal_code_unique": {
++          "name": "products_internal_code_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "internal_code"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.sales": {
++      "name": "sales",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "product_id": {
++          "name": "product_id",
++          "type": "uuid",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "source": {
++          "name": "source",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'manual'"
++        },
++        "product_name_snapshot": {
++          "name": "product_name_snapshot",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_order_id": {
++          "name": "ml_order_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_pack_id": {
++          "name": "ml_pack_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "buyer_nickname": {
++          "name": "buyer_nickname",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "buyer_full_name": {
++          "name": "buyer_full_name",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "quantity": {
++          "name": "quantity",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true,
++          "default": 1
++        },
++        "sale_date": {
++          "name": "sale_date",
++          "type": "date",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "order_status": {
++          "name": "order_status",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'pendente'"
++        },
++        "notes": {
++          "name": "notes",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "dispatched_by": {
++          "name": "dispatched_by",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'juan'"
++        },
++        "operational_fee_percent_snapshot": {
++          "name": "operational_fee_percent_snapshot",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'5'"
++        },
++        "reserve_percent_snapshot": {
++          "name": "reserve_percent_snapshot",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'30'"
++        },
++        "donation_percent_snapshot": {
++          "name": "donation_percent_snapshot",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'10'"
++        },
++        "unit_price_snapshot": {
++          "name": "unit_price_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "kit_quantity_snapshot": {
++          "name": "kit_quantity_snapshot",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "sale_fee_type_snapshot": {
++          "name": "sale_fee_type_snapshot",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "sale_fee_value_snapshot": {
++          "name": "sale_fee_value_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "free_shipping_snapshot": {
++          "name": "free_shipping_snapshot",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "shipping_cost_snapshot": {
++          "name": "shipping_cost_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "packaging_cost_snapshot": {
++          "name": "packaging_cost_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "product_cost_snapshot": {
++          "name": "product_cost_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_sale_fee_total_snapshot": {
++          "name": "ml_sale_fee_total_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_shipping_total_snapshot": {
++          "name": "ml_shipping_total_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "product_cost_manual_snapshot": {
++          "name": "product_cost_manual_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_seller_id": {
++          "name": "ml_seller_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "money_release_date": {
++          "name": "money_release_date",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "money_release_status": {
++          "name": "money_release_status",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "money_release_checked_at": {
++          "name": "money_release_checked_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {
++        "sales_product_id_idx": {
++          "name": "sales_product_id_idx",
++          "columns": [
++            {
++              "expression": "product_id",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        },
++        "sales_sale_date_idx": {
++          "name": "sales_sale_date_idx",
++          "columns": [
++            {
++              "expression": "sale_date",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        },
++        "sales_order_status_idx": {
++          "name": "sales_order_status_idx",
++          "columns": [
++            {
++              "expression": "order_status",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        },
++        "sales_money_release_status_idx": {
++          "name": "sales_money_release_status_idx",
++          "columns": [
++            {
++              "expression": "money_release_status",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        }
++      },
++      "foreignKeys": {
++        "sales_product_id_products_id_fk": {
++          "name": "sales_product_id_products_id_fk",
++          "tableFrom": "sales",
++          "tableTo": "products",
++          "columnsFrom": [
++            "product_id"
++          ],
++          "columnsTo": [
++            "id"
++          ],
++          "onDelete": "set null",
++          "onUpdate": "no action"
++        }
++      },
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {},
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.settings": {
++      "name": "settings",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "text",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "'default'"
++        },
++        "operational_fee_percent": {
++          "name": "operational_fee_percent",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'5'"
++        },
++        "reserve_percent": {
++          "name": "reserve_percent",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'30'"
++        },
++        "donation_percent": {
++          "name": "donation_percent",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'10'"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {},
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {},
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    }
++  },
++  "enums": {},
++  "schemas": {},
++  "sequences": {},
++  "roles": {},
++  "policies": {},
++  "views": {},
++  "_meta": {
++    "columns": {},
++    "schemas": {},
++    "tables": {}
++  }
++}
+\ No newline at end of file
+diff --git a/drizzle/meta/_journal.json b/drizzle/meta/_journal.json
+index c591ebf..8b1edf0 100755
+--- a/drizzle/meta/_journal.json
++++ b/drizzle/meta/_journal.json
+@@ -64,6 +64,13 @@
+       "when": 1789419210147,
+       "tag": "0008_ml_multi_account",
+       "breakpoints": true
++    },
++    {
++      "idx": 9,
++      "version": "7",
++      "when": 1789428994905,
++      "tag": "0009_money_release_liberacoes",
++      "breakpoints": true
+     }
+   ]
+ }
+\ No newline at end of file
+diff --git a/src/actions/liberacoes.ts b/src/actions/liberacoes.ts
+new file mode 100644
+index 0000000..5529f6f
+--- /dev/null
++++ b/src/actions/liberacoes.ts
+@@ -0,0 +1,134 @@
++"use server";
++
++import { revalidatePath } from "next/cache";
++import { and, eq, isNull, ne, or } from "drizzle-orm";
++import { db } from "@/db";
++import { sales } from "@/db/schema";
++import { withFinancials, type SaleWithFinancials } from "@/lib/sale-financials";
++import { getValidAccessTokenForAccount, fetchMoneyReleaseInfo } from "@/lib/mercadolivre";
++
++export type LiberacaoRow = SaleWithFinancials & { netAmount: number };
++
++// Considera "pendente de liberação" toda venda do Mercado Livre cujo status
++// de liberação ainda não é "released" (inclui nunca verificadas, onde o
++// status fica null).
++function notReleasedCondition() {
++  return and(
++    eq(sales.source, "mercadolivre"),
++    or(isNull(sales.moneyReleaseStatus), ne(sales.moneyReleaseStatus, "released"))
++  );
++}
++
++/**
++ * Valor líquido estimado que efetivamente cai na conta do vendedor: receita
++ * menos a tarifa de venda do Mercado Livre menos o frete cobrado do
++ * vendedor — os três já são valores REAIS (não estimativas) vindos do
++ * Mercado Livre no momento da confirmação da venda. Não inclui o custo do
++ * produto (isso não é descontado pelo marketplace, é custo interno).
++ */
++function withNetAmount(sale: ReturnType<typeof withFinancials>): LiberacaoRow {
++  return { ...sale, netAmount: sale.revenue - sale.saleFeeAmount - sale.shippingTotal };
++}
++
++async function loadPendingReleaseSales(): Promise<LiberacaoRow[]> {
++  const rows = await db.select().from(sales).where(notReleasedCondition()).orderBy(sales.saleDate);
++  return rows.map((row) => withNetAmount(withFinancials(row)));
++}
++
++/**
++ * Lista cada venda do Mercado Livre ainda não liberada, para a aba
++ * /liberacoes — uma por linha, com todo o detalhe (não é uma agregação).
++ */
++export async function listLiberacoes(): Promise<LiberacaoRow[]> {
++  return loadPendingReleaseSales();
++}
++
++/**
++ * Resumo para o card do dashboard: quantas vendas e quanto, no total, ainda
++ * está pendente de cair na conta.
++ */
++export async function getPendingReleaseSummary(): Promise<{ count: number; total: number }> {
++  const rows = await loadPendingReleaseSales();
++  const total = rows.reduce((sum, r) => sum + r.netAmount, 0);
++  return { count: rows.length, total };
++}
++
++/**
++ * Consulta no Mercado Livre a data/status de liberação de todas as vendas
++ * ainda não marcadas como liberadas, e atualiza o banco. Agrupa por conta
++ * vendedora (mlSellerId) porque o access_token e o lote da consulta são por
++ * conta. Vendas antigas sem mlSellerId identificado (confirmadas antes dessa
++ * coluna existir) são ignoradas — não tem como saber de qual conta usar o
++ * token.
++ */
++export async function atualizarLiberacoes(): Promise<{ ok: boolean; message: string }> {
++  const rows = await db.select().from(sales).where(notReleasedCondition());
++
++  const withOrderAndSeller = rows.filter(
++    (row): row is typeof row & { mlOrderId: string; mlSellerId: string } =>
++      Boolean(row.mlOrderId) && Boolean(row.mlSellerId)
++  );
++  const skippedNoSeller = rows.length - withOrderAndSeller.length;
++
++  if (withOrderAndSeller.length === 0) {
++    return {
++      ok: true,
++      message:
++        skippedNoSeller > 0
++          ? `Nenhuma venda pôde ser verificada: ${skippedNoSeller} venda(s) pendente(s) não tem a conta identificada (foram confirmadas antes desse recurso existir).`
++          : "Nenhuma venda pendente de liberação para atualizar.",
++    };
++  }
++
++  const bySeller = new Map<string, typeof withOrderAndSeller>();
++  for (const row of withOrderAndSeller) {
++    const list = bySeller.get(row.mlSellerId) ?? [];
++    list.push(row);
++    bySeller.set(row.mlSellerId, list);
++  }
++
++  let updated = 0;
++  let released = 0;
++  const errors: string[] = [];
++
++  for (const [sellerId, sellerRows] of bySeller) {
++    try {
++      const accessToken = await getValidAccessTokenForAccount(sellerId);
++      const orderIds = Array.from(new Set(sellerRows.map((r) => r.mlOrderId)));
++      const info = await fetchMoneyReleaseInfo(orderIds, accessToken);
++
++      for (const row of sellerRows) {
++        const releaseInfo = info.get(row.mlOrderId);
++        if (!releaseInfo) continue;
++        await db
++          .update(sales)
++          .set({
++            moneyReleaseDate: releaseInfo.moneyReleaseDate,
++            moneyReleaseStatus: releaseInfo.moneyReleaseStatus,
++            moneyReleaseCheckedAt: new Date(),
++            updatedAt: new Date(),
++          })
++          .where(eq(sales.id, row.id));
++        updated += 1;
++        if (releaseInfo.moneyReleaseStatus === "released") released += 1;
++      }
++    } catch (err) {
++      errors.push(err instanceof Error ? err.message : "erro desconhecido");
++    }
++  }
++
++  revalidatePath("/liberacoes");
++  revalidatePath("/");
++
++  const skippedNote = skippedNoSeller > 0 ? ` (${skippedNoSeller} sem conta identificada, ignorada(s))` : "";
++  if (errors.length > 0) {
++    return {
++      ok: updated > 0,
++      message: `${updated} venda(s) verificada(s), ${released} já liberada(s)${skippedNote}. Erros: ${errors.join("; ")}`,
++    };
++  }
++  return {
++    ok: true,
++    message: `${updated} venda(s) verificada(s), ${released} já liberada(s)${skippedNote}.`,
++  };
++}
+diff --git a/src/actions/mercadolivre.ts b/src/actions/mercadolivre.ts
+index 21d3c66..00319ab 100644
+--- a/src/actions/mercadolivre.ts
++++ b/src/actions/mercadolivre.ts
+@@ -142,6 +142,7 @@ export async function confirmPendingSale(
+       source: "mercadolivre",
+       productNameSnapshot: pending.titleSnapshot,
+       mlOrderId: pending.mlOrderId,
++      mlSellerId: pending.mlSellerId,
+       mlPackId: pending.mlPackId,
+       buyerNickname: pending.buyerNickname,
+       buyerFullName: pending.buyerFullName,
+diff --git a/src/app/liberacoes/page.tsx b/src/app/liberacoes/page.tsx
+new file mode 100644
+index 0000000..4e30327
+--- /dev/null
++++ b/src/app/liberacoes/page.tsx
+@@ -0,0 +1,70 @@
++import { Wallet } from "lucide-react";
++import { Card } from "@/components/ui/Card";
++import { listLiberacoes } from "@/actions/liberacoes";
++import { listConnections } from "@/actions/mercadolivre";
++import { LiberacaoCard } from "@/components/liberacoes/LiberacaoCard";
++import { AtualizarLiberacoesButton } from "@/components/liberacoes/AtualizarLiberacoesButton";
++import { formatCurrency } from "@/lib/format";
++
++export const dynamic = "force-dynamic";
++
++export default async function LiberacoesPage() {
++  const [sales, connections] = await Promise.all([listLiberacoes(), listConnections()]);
++
++  const accountLabelByMlUserId = new Map(
++    connections.map((c) => [c.mlUserId, c.nickname ?? `Vendedor ${c.mlUserId}`])
++  );
++
++  const total = sales.reduce((sum, s) => sum + s.netAmount, 0);
++
++  return (
++    <div className="p-4 md:p-8 max-w-3xl mx-auto animate-in">
++      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-6">
++        <div>
++          <h1 className="text-2xl font-bold">Liberações pendentes</h1>
++          <p className="text-sm text-muted mt-0.5">
++            Vendas do Mercado Livre cujo dinheiro ainda não caiu na conta — atualize para consultar a previsão de
++            liberação de cada uma.
++          </p>
++        </div>
++        <AtualizarLiberacoesButton />
++      </div>
++
++      <Card className="flex items-center justify-between gap-4 mb-6">
++        <div className="flex items-center gap-3">
++          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-success-soft text-success">
++            <Wallet size={18} />
++          </span>
++          <div>
++            <p className="text-sm font-semibold">{sales.length} venda(s) pendente(s) de liberação</p>
++            <p className="text-xs text-muted">Soma do valor líquido a cair na conta</p>
++          </div>
++        </div>
++        <p className="text-xl font-bold text-success">{formatCurrency(total)}</p>
++      </Card>
++
++      {sales.length === 0 ? (
++        <Card className="flex flex-col items-center justify-center gap-2 py-12 text-center">
++          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-muted text-muted">
++            <Wallet size={22} />
++          </span>
++          <p className="font-semibold text-sm">Nenhuma venda pendente de liberação</p>
++          <p className="text-xs text-muted max-w-sm">
++            Todas as vendas confirmadas do Mercado Livre já foram liberadas na conta (ou ainda não foram verificadas
++            — clique em &ldquo;Atualizar liberações&rdquo;).
++          </p>
++        </Card>
++      ) : (
++        <div className="space-y-3">
++          {sales.map((sale) => (
++            <LiberacaoCard
++              key={sale.id}
++              sale={sale}
++              accountLabel={sale.mlSellerId ? (accountLabelByMlUserId.get(sale.mlSellerId) ?? null) : null}
++            />
++          ))}
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/src/app/page.tsx b/src/app/page.tsx
+index d10c923..2294df1 100755
+--- a/src/app/page.tsx
++++ b/src/app/page.tsx
+@@ -1,9 +1,10 @@
+ import Link from "next/link";
+-import { ArrowRight, Clock, CreditCard, DollarSign, Percent, Receipt, ShoppingBag, Truck } from "lucide-react";
++import { ArrowRight, Clock, CreditCard, DollarSign, Percent, Receipt, ShoppingBag, Truck, Wallet } from "lucide-react";
+ import { getSalesForRange } from "@/actions/sales";
+ import { getMonthlyGoal } from "@/actions/goals";
+ import { getSettings } from "@/actions/settings";
+ import { listProducts } from "@/actions/products";
++import { getPendingReleaseSummary } from "@/actions/liberacoes";
+ import { DashboardFilterBar } from "@/components/dashboard/DashboardFilterBar";
+ import { FeeCard } from "@/components/dashboard/FeeCard";
+ import { GoalCard } from "@/components/dashboard/GoalCard";
+@@ -41,14 +42,16 @@ export default async function DashboardPage(props: PageProps<"/">) {
+ 
+   const prevPeriod = from && to ? previousPeriod(from, to) : null;
+ 
+-  const [goal, products, currentSales, goalMonthSales, partnerSettings, previousSales] = await Promise.all([
+-    getMonthlyGoal(yearMonth),
+-    listProducts(),
+-    getSalesForRange(from, to, productId),
+-    getSalesForRange(goalFrom, goalTo),
+-    getSettings(),
+-    prevPeriod ? getSalesForRange(prevPeriod.from, prevPeriod.to, productId) : Promise.resolve([]),
+-  ]);
++  const [goal, products, currentSales, goalMonthSales, partnerSettings, previousSales, pendingRelease] =
++    await Promise.all([
++      getMonthlyGoal(yearMonth),
++      listProducts(),
++      getSalesForRange(from, to, productId),
++      getSalesForRange(goalFrom, goalTo),
++      getSettings(),
++      prevPeriod ? getSalesForRange(prevPeriod.from, prevPeriod.to, productId) : Promise.resolve([]),
++      getPendingReleaseSummary(),
++    ]);
+ 
+   const totals = currentSales.reduce(
+     (acc, s) => {
+@@ -217,6 +220,12 @@ export default async function DashboardPage(props: PageProps<"/">) {
+         />
+         <StatCard label="Margem média" value={formatPercent(avgMargin)} icon={Percent} />
+         <StatCard label="Pedidos pendentes" value={String(totals.pending)} icon={Truck} tone={totals.pending > 0 ? "danger" : "neutral"} />
++        <StatCard
++          label={`Valor a liberar (${pendingRelease.count} venda${pendingRelease.count === 1 ? "" : "s"})`}
++          value={formatCurrency(pendingRelease.total)}
++          icon={Wallet}
++          tone={pendingRelease.count > 0 ? "success" : "neutral"}
++        />
+         <div className="md:col-span-2">
+           <FeeCard
+             label="Taxa de envio"
+diff --git a/src/components/liberacoes/AtualizarLiberacoesButton.tsx b/src/components/liberacoes/AtualizarLiberacoesButton.tsx
+new file mode 100644
+index 0000000..d0a8d4c
+--- /dev/null
++++ b/src/components/liberacoes/AtualizarLiberacoesButton.tsx
+@@ -0,0 +1,36 @@
++"use client";
++
++import { useState, useTransition } from "react";
++import { Loader2, RefreshCw } from "lucide-react";
++import { Button } from "@/components/ui/Button";
++import { atualizarLiberacoes } from "@/actions/liberacoes";
++
++export function AtualizarLiberacoesButton() {
++  const [isPending, startTransition] = useTransition();
++  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
++
++  return (
++    <div className="flex flex-col items-end gap-1.5">
++      <Button
++        type="button"
++        variant="outline"
++        size="md"
++        disabled={isPending}
++        onClick={() => {
++          setResult(null);
++          startTransition(() => {
++            atualizarLiberacoes().then(setResult);
++          });
++        }}
++      >
++        {isPending ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
++        Atualizar liberações
++      </Button>
++      {result && (
++        <p className={`text-xs max-w-xs text-right ${result.ok ? "text-success" : "text-danger"}`}>
++          {result.message}
++        </p>
++      )}
++    </div>
++  );
++}
+diff --git a/src/components/liberacoes/LiberacaoCard.tsx b/src/components/liberacoes/LiberacaoCard.tsx
+new file mode 100644
+index 0000000..9d6925e
+--- /dev/null
++++ b/src/components/liberacoes/LiberacaoCard.tsx
+@@ -0,0 +1,79 @@
++import { Wallet, Clock } from "lucide-react";
++import { Card, Badge } from "@/components/ui/Card";
++import { formatCurrency, formatDate, formatTime } from "@/lib/format";
++import type { LiberacaoRow } from "@/actions/liberacoes";
++
++export function LiberacaoCard({ sale, accountLabel }: { sale: LiberacaoRow; accountLabel: string | null }) {
++  const saleDateObj = new Date(sale.saleDate + "T00:00:00");
++
++  return (
++    <Card className="space-y-3">
++      <div className="flex items-start justify-between gap-3">
++        <div className="min-w-0">
++          <p className="font-semibold text-sm truncate">{sale.productNameSnapshot}</p>
++          <p className="text-xs text-muted mt-0.5">
++            Pedido ML #{sale.mlOrderId}
++            {sale.mlPackId && sale.mlPackId !== sale.mlOrderId
++              ? ` (venda #${sale.mlPackId} na Central de Vendedores)`
++              : ""}{" "}
++            · vendida em {formatDate(saleDateObj)}
++          </p>
++          {(sale.buyerFullName || sale.buyerNickname) && (
++            <p className="text-xs text-muted mt-0.5">
++              Cliente: <span className="font-medium text-foreground">{sale.buyerFullName ?? sale.buyerNickname}</span>
++            </p>
++          )}
++        </div>
++        <span className="shrink-0 flex h-9 w-9 items-center justify-center rounded-lg bg-accent-soft text-accent">
++          <Wallet size={16} />
++        </span>
++      </div>
++
++      <div className="flex flex-wrap items-center gap-2 text-xs">
++        <span className="rounded-full bg-surface-muted px-2.5 py-1 text-muted">
++          Receita: <span className="font-semibold text-foreground">{formatCurrency(sale.revenue)}</span>
++        </span>
++        <span className="rounded-full bg-surface-muted px-2.5 py-1 text-muted">
++          Tarifa de venda: <span className="font-semibold text-foreground">{formatCurrency(sale.saleFeeAmount)}</span>
++        </span>
++        <span className="rounded-full bg-surface-muted px-2.5 py-1 text-muted">
++          Frete: <span className="font-semibold text-foreground">{formatCurrency(sale.shippingTotal)}</span>
++        </span>
++      </div>
++
++      <div className="flex items-center justify-between border-t border-border pt-3">
++        <div>
++          <p className="text-xs text-muted">Valor líquido a receber</p>
++          <p className="text-lg font-bold text-success">{formatCurrency(sale.netAmount)}</p>
++        </div>
++        <div className="text-right">
++          {sale.moneyReleaseDate ? (
++            <>
++              <p className="text-xs text-muted">Previsão de liberação</p>
++              <p className="text-sm font-semibold">
++                {formatDate(sale.moneyReleaseDate)} às {formatTime(sale.moneyReleaseDate)}
++              </p>
++            </>
++          ) : (
++            <Badge tone="neutral">Ainda não verificado</Badge>
++          )}
++          {sale.moneyReleaseStatus && (
++            <Badge tone="warning" className="mt-1">
++              {sale.moneyReleaseStatus}
++            </Badge>
++          )}
++        </div>
++      </div>
++
++      <div className="flex items-center justify-between text-[11px] text-muted">
++        <span>{accountLabel ?? "Conta não identificada"}</span>
++        {sale.moneyReleaseCheckedAt && (
++          <span className="flex items-center gap-1">
++            <Clock size={11} />
++            verificado em {formatDate(sale.moneyReleaseCheckedAt)} às {formatTime(sale.moneyReleaseCheckedAt)}
++          </span>
++        )}
++      </div>
++    </Card>
++  );
++}
+diff --git a/src/components/nav/NavLinks.tsx b/src/components/nav/NavLinks.tsx
+index d51f3da..3de7f8a 100755
+--- a/src/components/nav/NavLinks.tsx
++++ b/src/components/nav/NavLinks.tsx
+@@ -2,13 +2,14 @@
+ 
+ import Link from "next/link";
+ import { usePathname } from "next/navigation";
+-import { Boxes, Inbox, LayoutDashboard, Package, ShoppingBag } from "lucide-react";
++import { Boxes, Inbox, LayoutDashboard, Package, ShoppingBag, Wallet } from "lucide-react";
+ import { cn } from "@/lib/utils";
+ 
+ const links = [
+   { href: "/", label: "Dashboard", icon: LayoutDashboard },
+   { href: "/vendas", label: "Vendas", icon: ShoppingBag },
+   { href: "/pendentes", label: "Pendentes", icon: Inbox },
++  { href: "/liberacoes", label: "Liberações", icon: Wallet },
+   { href: "/produtos", label: "Produtos", icon: Package },
+   { href: "/custo-fornecimento", label: "Custo Fornecimento", icon: Boxes },
+ ];
+diff --git a/src/db/schema.ts b/src/db/schema.ts
+index c987b36..f7f4605 100755
+--- a/src/db/schema.ts
++++ b/src/db/schema.ts
+@@ -204,6 +204,23 @@ export const sales = pgTable(
+       scale: 2,
+     }),
+ 
++    // Vendedor (conta do Mercado Livre) a que essa venda pertence — necessário
++    // desde que passou a ser possível conectar mais de uma conta, para saber
++    // de qual conta usar o access_token na hora de consultar a liberação do
++    // dinheiro (ver /liberacoes). Null em vendas manuais e em vendas do
++    // Mercado Livre confirmadas antes dessa coluna existir.
++    mlSellerId: text("ml_seller_id"),
++    // --- Liberação do dinheiro na conta do Mercado Livre (ver /liberacoes) ---
++    // Preenchidos consultando a API de billing do Mercado Livre com o mesmo
++    // access_token da venda — não é um valor calculado localmente. Ficam
++    // null até a primeira consulta encontrar informação sobre essa venda.
++    moneyReleaseDate: timestamp("money_release_date", { withTimezone: true }),
++    moneyReleaseStatus: text("money_release_status"),
++    // Quando a liberação dessa venda foi consultada pela última vez — usado
++    // só para diagnóstico (saber se uma venda ficou "esquecida" sem nunca
++    // ter sido verificada).
++    moneyReleaseCheckedAt: timestamp("money_release_checked_at", { withTimezone: true }),
++
+     createdAt: timestamp("created_at", { withTimezone: true })
+       .notNull()
+       .defaultNow(),
+@@ -215,6 +232,7 @@ export const sales = pgTable(
+     index("sales_product_id_idx").on(table.productId),
+     index("sales_sale_date_idx").on(table.saleDate),
+     index("sales_order_status_idx").on(table.orderStatus),
++    index("sales_money_release_status_idx").on(table.moneyReleaseStatus),
+   ]
+ );
+ 
+@@ -311,6 +329,10 @@ export const pendingSales = pgTable(
+ 
+     mlOrderId: text("ml_order_id").notNull(),
+     mlOrderItemId: text("ml_order_item_id").notNull(),
++    // Vendedor (conta do Mercado Livre) dono desse pedido — propagado para
++    // `sales.mlSellerId` na confirmação, pra saber depois de qual conta usar
++    // o access_token ao consultar a liberação do dinheiro dessa venda.
++    mlSellerId: text("ml_seller_id"),
+     // ID do "pack" do Mercado Livre (order.pack_id). A Central de Vendedores
+     // do próprio Mercado Livre identifica a venda por esse número, não pelo
+     // order_id — mesmo quando não há carrinho com itens de vendedores
+diff --git a/src/lib/mercadolivre.ts b/src/lib/mercadolivre.ts
+index f209954..f96c4af 100644
+--- a/src/lib/mercadolivre.ts
++++ b/src/lib/mercadolivre.ts
+@@ -464,6 +464,7 @@ export async function upsertPendingSalesFromOrder(
+       .values({
+         mlOrderId: String(order.id),
+         mlOrderItemId: orderItem.item.id,
++        mlSellerId: ctx.sellerId,
+         mlPackId: packId,
+         titleSnapshot: orderItem.item.title,
+         quantity: orderItem.quantity,
+@@ -479,6 +480,7 @@ export async function upsertPendingSalesFromOrder(
+       .onConflictDoUpdate({
+         target: [pendingSales.mlOrderId, pendingSales.mlOrderItemId],
+         set: {
++          mlSellerId: ctx.sellerId,
+           mlPackId: packId,
+           titleSnapshot: orderItem.item.title,
+           quantity: orderItem.quantity,
+@@ -495,3 +497,102 @@ export async function upsertPendingSalesFromOrder(
+       });
+   }
+ }
++
++// --- Liberação do dinheiro na conta (ver /liberacoes) ---
++
++export interface MoneyReleaseInfo {
++  moneyReleaseDate: Date | null;
++  moneyReleaseStatus: string | null;
++}
++
++/**
++ * Procura recursivamente, em qualquer nível da resposta, por objetos que
++ * tenham money_release_date/money_release_status e associa ao order_id mais
++ * próximo (do próprio objeto, ou herdado de um nível acima). O formato exato
++ * da resposta de /billing/integration/group/ML/order/details não é
++ * documentado publicamente — em vez de assumir um único formato fixo (ex.:
++ * sempre um array "payment_info" no nível raiz) e quebrar silenciosamente se
++ * o Mercado Livre aninhar diferente, essa busca tolerante reconhece o dado
++ * onde quer que ele esteja.
++ */
++function collectMoneyReleaseInfo(
++  node: unknown,
++  inheritedOrderId: string | undefined,
++  result: Map<string, MoneyReleaseInfo>
++): void {
++  if (Array.isArray(node)) {
++    for (const item of node) collectMoneyReleaseInfo(item, inheritedOrderId, result);
++    return;
++  }
++  if (!node || typeof node !== "object") return;
++
++  const obj = node as Record<string, unknown>;
++  const rawOrderId = obj.order_id ?? obj.orderId;
++  const orderId = rawOrderId !== undefined && rawOrderId !== null ? String(rawOrderId) : inheritedOrderId;
++
++  if (orderId && ("money_release_date" in obj || "money_release_status" in obj)) {
++    result.set(orderId, {
++      moneyReleaseDate:
++        typeof obj.money_release_date === "string" ? new Date(obj.money_release_date) : null,
++      moneyReleaseStatus: typeof obj.money_release_status === "string" ? obj.money_release_status : null,
++    });
++  }
++
++  for (const value of Object.values(obj)) {
++    collectMoneyReleaseInfo(value, orderId, result);
++  }
++}
++
++/**
++ * Consulta, para pedidos de UM MESMO vendedor, a data e o status de
++ * liberação do dinheiro na conta do Mercado Livre — usa o mesmo access_token
++ * da venda (endpoint de billing do próprio Mercado Livre), sem precisar de
++ * credenciais separadas do Mercado Pago. Processa em lotes de até 60 pedidos
++ * (limite do endpoint). Pedidos que não vierem na resposta (ex.: ainda não
++ * processados pelo Mercado Livre) simplesmente ficam de fora do Map
++ * retornado — quem chamar decide o que fazer nesse caso.
++ *
++ * Se uma resposta não tiver nenhuma informação reconhecível, registra o
++ * payload bruto no log (em vez de falhar silenciosamente) para facilitar
++ * ajustar o parsing rapidamente caso o Mercado Livre mude o formato.
++ */
++export async function fetchMoneyReleaseInfo(
++  orderIds: string[],
++  accessToken: string
++): Promise<Map<string, MoneyReleaseInfo>> {
++  const result = new Map<string, MoneyReleaseInfo>();
++  const BATCH_SIZE = 60;
++
++  for (let i = 0; i < orderIds.length; i += BATCH_SIZE) {
++    const batch = orderIds.slice(i, i + BATCH_SIZE);
++    const url = new URL(`${ML_API_BASE}/billing/integration/group/ML/order/details`);
++    url.searchParams.set("order_ids", batch.join(","));
++
++    let body: unknown;
++    try {
++      const response = await fetch(url.toString(), {
++        headers: { Authorization: `Bearer ${accessToken}` },
++      });
++      if (!response.ok) {
++        const text = await response.text().catch(() => "");
++        console.error(`[liberacoes] falha ao consultar liberação (${response.status}): ${text}`);
++        continue;
++      }
++      body = await response.json();
++    } catch (err) {
++      console.error("[liberacoes] erro de rede ao consultar liberação:", err);
++      continue;
++    }
++
++    const sizeBefore = result.size;
++    collectMoneyReleaseInfo(body, undefined, result);
++    if (result.size === sizeBefore) {
++      console.error(
++        "[liberacoes] nenhuma informação de liberação reconhecida na resposta, payload bruto:",
++        JSON.stringify(body).slice(0, 3000)
++      );
++    }
++  }
++
++  return result;
++}
+-- 
+2.43.0
+

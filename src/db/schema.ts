@@ -204,6 +204,23 @@ export const sales = pgTable(
       scale: 2,
     }),
 
+    // Vendedor (conta do Mercado Livre) a que essa venda pertence — necessário
+    // desde que passou a ser possível conectar mais de uma conta, para saber
+    // de qual conta usar o access_token na hora de consultar a liberação do
+    // dinheiro (ver /liberacoes). Null em vendas manuais e em vendas do
+    // Mercado Livre confirmadas antes dessa coluna existir.
+    mlSellerId: text("ml_seller_id"),
+    // --- Liberação do dinheiro na conta do Mercado Livre (ver /liberacoes) ---
+    // Preenchidos consultando a API de billing do Mercado Livre com o mesmo
+    // access_token da venda — não é um valor calculado localmente. Ficam
+    // null até a primeira consulta encontrar informação sobre essa venda.
+    moneyReleaseDate: timestamp("money_release_date", { withTimezone: true }),
+    moneyReleaseStatus: text("money_release_status"),
+    // Quando a liberação dessa venda foi consultada pela última vez — usado
+    // só para diagnóstico (saber se uma venda ficou "esquecida" sem nunca
+    // ter sido verificada).
+    moneyReleaseCheckedAt: timestamp("money_release_checked_at", { withTimezone: true }),
+
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -215,6 +232,7 @@ export const sales = pgTable(
     index("sales_product_id_idx").on(table.productId),
     index("sales_sale_date_idx").on(table.saleDate),
     index("sales_order_status_idx").on(table.orderStatus),
+    index("sales_money_release_status_idx").on(table.moneyReleaseStatus),
   ]
 );
 
@@ -311,6 +329,10 @@ export const pendingSales = pgTable(
 
     mlOrderId: text("ml_order_id").notNull(),
     mlOrderItemId: text("ml_order_item_id").notNull(),
+    // Vendedor (conta do Mercado Livre) dono desse pedido — propagado para
+    // `sales.mlSellerId` na confirmação, pra saber depois de qual conta usar
+    // o access_token ao consultar a liberação do dinheiro dessa venda.
+    mlSellerId: text("ml_seller_id"),
     // ID do "pack" do Mercado Livre (order.pack_id). A Central de Vendedores
     // do próprio Mercado Livre identifica a venda por esse número, não pelo
     // order_id — mesmo quando não há carrinho com itens de vendedores

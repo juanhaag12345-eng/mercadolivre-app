@@ -464,6 +464,7 @@ export async function upsertPendingSalesFromOrder(
       .values({
         mlOrderId: String(order.id),
         mlOrderItemId: orderItem.item.id,
+        mlSellerId: ctx.sellerId,
         mlPackId: packId,
         titleSnapshot: orderItem.item.title,
         quantity: orderItem.quantity,
@@ -479,6 +480,7 @@ export async function upsertPendingSalesFromOrder(
       .onConflictDoUpdate({
         target: [pendingSales.mlOrderId, pendingSales.mlOrderItemId],
         set: {
+          mlSellerId: ctx.sellerId,
           mlPackId: packId,
           titleSnapshot: orderItem.item.title,
           quantity: orderItem.quantity,
@@ -494,4 +496,103 @@ export async function upsertPendingSalesFromOrder(
         },
       });
   }
+}
+
+// --- Liberação do dinheiro na conta (ver /liberacoes) ---
+
+export interface MoneyReleaseInfo {
+  moneyReleaseDate: Date | null;
+  moneyReleaseStatus: string | null;
+}
+
+/**
+ * Procura recursivamente, em qualquer nível da resposta, por objetos que
+ * tenham money_release_date/money_release_status e associa ao order_id mais
+ * próximo (do próprio objeto, ou herdado de um nível acima). O formato exato
+ * da resposta de /billing/integration/group/ML/order/details não é
+ * documentado publicamente — em vez de assumir um único formato fixo (ex.:
+ * sempre um array "payment_info" no nível raiz) e quebrar silenciosamente se
+ * o Mercado Livre aninhar diferente, essa busca tolerante reconhece o dado
+ * onde quer que ele esteja.
+ */
+function collectMoneyReleaseInfo(
+  node: unknown,
+  inheritedOrderId: string | undefined,
+  result: Map<string, MoneyReleaseInfo>
+): void {
+  if (Array.isArray(node)) {
+    for (const item of node) collectMoneyReleaseInfo(item, inheritedOrderId, result);
+    return;
+  }
+  if (!node || typeof node !== "object") return;
+
+  const obj = node as Record<string, unknown>;
+  const rawOrderId = obj.order_id ?? obj.orderId;
+  const orderId = rawOrderId !== undefined && rawOrderId !== null ? String(rawOrderId) : inheritedOrderId;
+
+  if (orderId && ("money_release_date" in obj || "money_release_status" in obj)) {
+    result.set(orderId, {
+      moneyReleaseDate:
+        typeof obj.money_release_date === "string" ? new Date(obj.money_release_date) : null,
+      moneyReleaseStatus: typeof obj.money_release_status === "string" ? obj.money_release_status : null,
+    });
+  }
+
+  for (const value of Object.values(obj)) {
+    collectMoneyReleaseInfo(value, orderId, result);
+  }
+}
+
+/**
+ * Consulta, para pedidos de UM MESMO vendedor, a data e o status de
+ * liberação do dinheiro na conta do Mercado Livre — usa o mesmo access_token
+ * da venda (endpoint de billing do próprio Mercado Livre), sem precisar de
+ * credenciais separadas do Mercado Pago. Processa em lotes de até 60 pedidos
+ * (limite do endpoint). Pedidos que não vierem na resposta (ex.: ainda não
+ * processados pelo Mercado Livre) simplesmente ficam de fora do Map
+ * retornado — quem chamar decide o que fazer nesse caso.
+ *
+ * Se uma resposta não tiver nenhuma informação reconhecível, registra o
+ * payload bruto no log (em vez de falhar silenciosamente) para facilitar
+ * ajustar o parsing rapidamente caso o Mercado Livre mude o formato.
+ */
+export async function fetchMoneyReleaseInfo(
+  orderIds: string[],
+  accessToken: string
+): Promise<Map<string, MoneyReleaseInfo>> {
+  const result = new Map<string, MoneyReleaseInfo>();
+  const BATCH_SIZE = 60;
+
+  for (let i = 0; i < orderIds.length; i += BATCH_SIZE) {
+    const batch = orderIds.slice(i, i + BATCH_SIZE);
+    const url = new URL(`${ML_API_BASE}/billing/integration/group/ML/order/details`);
+    url.searchParams.set("order_ids", batch.join(","));
+
+    let body: unknown;
+    try {
+      const response = await fetch(url.toString(), {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        console.error(`[liberacoes] falha ao consultar liberação (${response.status}): ${text}`);
+        continue;
+      }
+      body = await response.json();
+    } catch (err) {
+      console.error("[liberacoes] erro de rede ao consultar liberação:", err);
+      continue;
+    }
+
+    const sizeBefore = result.size;
+    collectMoneyReleaseInfo(body, undefined, result);
+    if (result.size === sizeBefore) {
+      console.error(
+        "[liberacoes] nenhuma informação de liberação reconhecida na resposta, payload bruto:",
+        JSON.stringify(body).slice(0, 3000)
+      );
+    }
+  }
+
+  return result;
 }
