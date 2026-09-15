@@ -17,6 +17,11 @@ const ML_APP_ID = "8549699768586111";
 // entre o que a gente calcula e o que aparece na Central de Vendedores,
 // olhando o payload completo (order_items[].sale_fee, pack_id, etc).
 //
+// Com ?billingOrderIds=id1,id2,..., busca o JSON bruto de
+// GET /billing/integration/group/ML/order/details (liberação de pagamento,
+// usado em /liberacoes) — esse endpoint não é documentado publicamente,
+// então esse parâmetro serve pra inspecionar o formato real da resposta.
+//
 // Com ?shipmentId=..., busca o JSON bruto de GET /shipments/$id/costs.
 //
 // Com ?shipmentId=...&address=1, busca GET /shipments/$id?views=destination
@@ -45,16 +50,19 @@ export async function GET(request: NextRequest) {
     }
     const accessToken = await getValidAccessTokenForAccount(mlUserId);
     const orderId = request.nextUrl.searchParams.get("orderId");
+    const billingOrderIds = request.nextUrl.searchParams.get("billingOrderIds");
     const shipmentId = request.nextUrl.searchParams.get("shipmentId");
     const wantAddress = request.nextUrl.searchParams.get("address") === "1";
 
     const url = orderId
       ? `https://api.mercadolibre.com/orders/${orderId}`
-      : shipmentId
-        ? wantAddress
-          ? `https://api.mercadolibre.com/shipments/${shipmentId}?views=destination`
-          : `https://api.mercadolibre.com/shipments/${shipmentId}/costs`
-        : `https://api.mercadolibre.com/missed_feeds?app_id=${ML_APP_ID}`;
+      : billingOrderIds
+        ? `https://api.mercadolibre.com/billing/integration/group/ML/order/details?order_ids=${billingOrderIds}`
+        : shipmentId
+          ? wantAddress
+            ? `https://api.mercadolibre.com/shipments/${shipmentId}?views=destination`
+            : `https://api.mercadolibre.com/shipments/${shipmentId}/costs`
+          : `https://api.mercadolibre.com/missed_feeds?app_id=${ML_APP_ID}`;
 
     const response = await fetch(url, {
       headers: {

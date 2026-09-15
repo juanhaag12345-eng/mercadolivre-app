@@ -71,6 +71,13 @@
       "when": 1789428994905,
       "tag": "0009_money_release_liberacoes",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1789430183101,
+      "tag": "0010_backfill_ml_seller_id",
+      "breakpoints": true
     }
   ]
 }
