@@ -1,0 +1,69 @@
+From 1ac6401a0a39d6502ec700d6bd86184f95f22e1e Mon Sep 17 00:00:00 2001
+From: Juan <juan@example.com>
+Date: Tue, 15 Sep 2026 00:05:59 +0000
+Subject: [PATCH] Adiciona diagnostico de pagamento no endpoint de debug
+
+O endpoint de liberacao usado em /liberacoes (billing/integration) retornou
+403 PA_UNAUTHORIZED_RESULT_FROM_POLICIES em teste real -- o app nao tem
+permissao pra ele. Adiciona duas formas alternativas de teste
+(paymentId via api.mercadopago.com e via api.mercadolibre.com/collections)
+pra descobrir qual delas o token atual consegue de fato usar antes de
+reescrever a logica de /liberacoes em cima da resposta certa.
+---
+ src/app/api/mercadolivre/debug/route.ts | 26 ++++++++++++++++++++-----
+ 1 file changed, 21 insertions(+), 5 deletions(-)
+
+diff --git a/src/app/api/mercadolivre/debug/route.ts b/src/app/api/mercadolivre/debug/route.ts
+index 64193e6..ad18bf4 100644
+--- a/src/app/api/mercadolivre/debug/route.ts
++++ b/src/app/api/mercadolivre/debug/route.ts
+@@ -21,6 +21,16 @@ const ML_APP_ID = "8549699768586111";
+ // GET /billing/integration/group/ML/order/details (liberação de pagamento,
+ // usado em /liberacoes) — esse endpoint não é documentado publicamente,
+ // então esse parâmetro serve pra inspecionar o formato real da resposta.
++// ATENÇÃO: confirmado que retorna 403 PA_UNAUTHORIZED_RESULT_FROM_POLICIES
++// com o token dessa aplicação — o app não tem permissão pra esse endpoint.
++//
++// Com ?paymentId=..., busca GET /v1/payments/$id (API de Pagamentos do
++// Mercado Pago, que tem o campo money_release_date) usando o mesmo
++// access_token do Mercado Livre. Com ?paymentId=...&paymentSource=ml, busca
++// em vez disso GET /collections/v1/payments/$id (o mesmo recurso, mas
++// espelhado no domínio do Mercado Livre) — testando as duas formas porque
++// não é garantido que o token do Mercado Livre tenha permissão para chamar
++// o domínio do Mercado Pago diretamente.
+ //
+ // Com ?shipmentId=..., busca o JSON bruto de GET /shipments/$id/costs.
+ //
+@@ -51,6 +61,8 @@ export async function GET(request: NextRequest) {
+     const accessToken = await getValidAccessTokenForAccount(mlUserId);
+     const orderId = request.nextUrl.searchParams.get("orderId");
+     const billingOrderIds = request.nextUrl.searchParams.get("billingOrderIds");
++    const paymentId = request.nextUrl.searchParams.get("paymentId");
++    const paymentSource = request.nextUrl.searchParams.get("paymentSource");
+     const shipmentId = request.nextUrl.searchParams.get("shipmentId");
+     const wantAddress = request.nextUrl.searchParams.get("address") === "1";
+ 
+@@ -58,11 +70,15 @@ export async function GET(request: NextRequest) {
+       ? `https://api.mercadolibre.com/orders/${orderId}`
+       : billingOrderIds
+         ? `https://api.mercadolibre.com/billing/integration/group/ML/order/details?order_ids=${billingOrderIds}`
+-        : shipmentId
+-          ? wantAddress
+-            ? `https://api.mercadolibre.com/shipments/${shipmentId}?views=destination`
+-            : `https://api.mercadolibre.com/shipments/${shipmentId}/costs`
+-          : `https://api.mercadolibre.com/missed_feeds?app_id=${ML_APP_ID}`;
++        : paymentId
++          ? paymentSource === "ml"
++            ? `https://api.mercadolibre.com/collections/v1/payments/${paymentId}`
++            : `https://api.mercadopago.com/v1/payments/${paymentId}`
++          : shipmentId
++            ? wantAddress
++              ? `https://api.mercadolibre.com/shipments/${shipmentId}?views=destination`
++              : `https://api.mercadolibre.com/shipments/${shipmentId}/costs`
++            : `https://api.mercadolibre.com/missed_feeds?app_id=${ML_APP_ID}`;
+ 
+     const response = await fetch(url, {
+       headers: {
+-- 
+2.43.0
+
