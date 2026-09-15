@@ -5,7 +5,7 @@ import { and, eq, isNull, ne, or } from "drizzle-orm";
 import { db } from "@/db";
 import { sales } from "@/db/schema";
 import { withFinancials, type SaleWithFinancials } from "@/lib/sale-financials";
-import { getValidAccessTokenForAccount, fetchMoneyReleaseInfo } from "@/lib/mercadolivre";
+import { getValidAccessTokenForAccount, fetchPaymentReleaseInfo } from "@/lib/mercadolivre";
 
 export type LiberacaoRow = SaleWithFinancials & { netAmount: number };
 
@@ -54,34 +54,35 @@ export async function getPendingReleaseSummary(): Promise<{ count: number; total
 }
 
 /**
- * Consulta no Mercado Livre a data/status de liberação de todas as vendas
- * ainda não marcadas como liberadas, e atualiza o banco. Agrupa por conta
- * vendedora (mlSellerId) porque o access_token e o lote da consulta são por
- * conta. Vendas antigas sem mlSellerId identificado (confirmadas antes dessa
- * coluna existir) são ignoradas — não tem como saber de qual conta usar o
- * token.
+ * Consulta a data/status de liberação de todas as vendas ainda não marcadas
+ * como liberadas (via GET /v1/payments/$id, por mlPaymentId — não é possível
+ * consultar em lote por order_id, ver fetchPaymentReleaseInfo) e atualiza o
+ * banco. Agrupa por conta vendedora (mlSellerId) porque o access_token é por
+ * conta. Vendas sem mlSellerId e/ou mlPaymentId identificados (confirmadas
+ * antes dessas colunas existirem) são ignoradas — não tem como saber de qual
+ * conta usar o token, ou qual pagamento consultar.
  */
 export async function atualizarLiberacoes(): Promise<{ ok: boolean; message: string }> {
   const rows = await db.select().from(sales).where(notReleasedCondition());
 
-  const withOrderAndSeller = rows.filter(
-    (row): row is typeof row & { mlOrderId: string; mlSellerId: string } =>
-      Boolean(row.mlOrderId) && Boolean(row.mlSellerId)
+  const withPaymentAndSeller = rows.filter(
+    (row): row is typeof row & { mlPaymentId: string; mlSellerId: string } =>
+      Boolean(row.mlPaymentId) && Boolean(row.mlSellerId)
   );
-  const skippedNoSeller = rows.length - withOrderAndSeller.length;
+  const skippedIncomplete = rows.length - withPaymentAndSeller.length;
 
-  if (withOrderAndSeller.length === 0) {
+  if (withPaymentAndSeller.length === 0) {
     return {
       ok: true,
       message:
-        skippedNoSeller > 0
-          ? `Nenhuma venda pôde ser verificada: ${skippedNoSeller} venda(s) pendente(s) não tem a conta identificada (foram confirmadas antes desse recurso existir).`
+        skippedIncomplete > 0
+          ? `Nenhuma venda pôde ser verificada: ${skippedIncomplete} venda(s) pendente(s) sem conta e/ou pagamento identificado.`
           : "Nenhuma venda pendente de liberação para atualizar.",
     };
   }
 
-  const bySeller = new Map<string, typeof withOrderAndSeller>();
-  for (const row of withOrderAndSeller) {
+  const bySeller = new Map<string, typeof withPaymentAndSeller>();
+  for (const row of withPaymentAndSeller) {
     const list = bySeller.get(row.mlSellerId) ?? [];
     list.push(row);
     bySeller.set(row.mlSellerId, list);
@@ -94,11 +95,11 @@ export async function atualizarLiberacoes(): Promise<{ ok: boolean; message: str
   for (const [sellerId, sellerRows] of bySeller) {
     try {
       const accessToken = await getValidAccessTokenForAccount(sellerId);
-      const orderIds = Array.from(new Set(sellerRows.map((r) => r.mlOrderId)));
-      const info = await fetchMoneyReleaseInfo(orderIds, accessToken);
+      const paymentIds = Array.from(new Set(sellerRows.map((r) => r.mlPaymentId)));
+      const info = await fetchPaymentReleaseInfo(paymentIds, accessToken);
 
       for (const row of sellerRows) {
-        const releaseInfo = info.get(row.mlOrderId);
+        const releaseInfo = info.get(row.mlPaymentId);
         if (!releaseInfo) continue;
         await db
           .update(sales)
@@ -120,7 +121,7 @@ export async function atualizarLiberacoes(): Promise<{ ok: boolean; message: str
   revalidatePath("/liberacoes");
   revalidatePath("/");
 
-  const skippedNote = skippedNoSeller > 0 ? ` (${skippedNoSeller} sem conta identificada, ignorada(s))` : "";
+  const skippedNote = skippedIncomplete > 0 ? ` (${skippedIncomplete} sem conta/pagamento identificado, ignorada(s))` : "";
   if (errors.length > 0) {
     return {
       ok: updated > 0,

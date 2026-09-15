@@ -1,0 +1,1 @@
+ALTER TABLE "sales" ADD COLUMN "ml_payment_id" text;

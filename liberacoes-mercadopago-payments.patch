@@ -1,0 +1,2111 @@
+From c6bc76a14669492db9aaef1532b5a63b1236d959 Mon Sep 17 00:00:00 2001
+From: Juan <juan@example.com>
+Date: Tue, 15 Sep 2026 00:14:45 +0000
+Subject: [PATCH] Corrige liberacoes: usa API de pagamentos do Mercado Pago
+ (v1/payments)
+
+O endpoint de billing do Mercado Livre confirmado sem permissao (403).
+GET https://api.mercadopago.com/v1/payments/$id funciona com o mesmo
+access_token e tem exatamente os campos precisos (money_release_date,
+money_release_status) -- confirmado em teste real, inclusive o
+net_received_amount bateu exatamente com o valor liquido que ja calculavamos.
+
+- Adiciona sales.mlPaymentId (order.payments[0].id), guardado na confirmacao
+  a partir do payload ja salvo (sem chamada nova a API).
+- Backfill do ml_payment_id em vendas antigas a partir do raw_order_payload
+  ja salvo em pending_sales.
+- Reescreve fetchMoneyReleaseInfo -> fetchPaymentReleaseInfo, consultando
+  por pagamento (nao ha consulta em lote nesse endpoint), em pequenos lotes
+  paralelos.
+- atualizarLiberacoes agora agrupa e consulta por mlPaymentId em vez de
+  mlOrderId.
+---
+ drizzle/0011_add_ml_payment_id.sql      |   1 +
+ drizzle/0012_backfill_ml_payment_id.sql |  11 +
+ drizzle/meta/0011_snapshot.json         | 850 ++++++++++++++++++++++++
+ drizzle/meta/0012_snapshot.json         | 850 ++++++++++++++++++++++++
+ drizzle/meta/_journal.json              |  14 +
+ src/actions/liberacoes.ts               |  41 +-
+ src/actions/mercadolivre.ts             |  19 +
+ src/db/schema.ts                        |   6 +
+ src/lib/mercadolivre.ts                 | 135 ++--
+ 9 files changed, 1831 insertions(+), 96 deletions(-)
+ create mode 100644 drizzle/0011_add_ml_payment_id.sql
+ create mode 100644 drizzle/0012_backfill_ml_payment_id.sql
+ create mode 100644 drizzle/meta/0011_snapshot.json
+ create mode 100644 drizzle/meta/0012_snapshot.json
+
+diff --git a/drizzle/0011_add_ml_payment_id.sql b/drizzle/0011_add_ml_payment_id.sql
+new file mode 100644
+index 0000000..774f076
+--- /dev/null
++++ b/drizzle/0011_add_ml_payment_id.sql
+@@ -0,0 +1 @@
++ALTER TABLE "sales" ADD COLUMN "ml_payment_id" text;
+\ No newline at end of file
+diff --git a/drizzle/0012_backfill_ml_payment_id.sql b/drizzle/0012_backfill_ml_payment_id.sql
+new file mode 100644
+index 0000000..e13d6d0
+--- /dev/null
++++ b/drizzle/0012_backfill_ml_payment_id.sql
+@@ -0,0 +1,11 @@
++-- Preenche ml_payment_id em vendas do Mercado Livre confirmadas ANTES dessa
++-- coluna existir. Assim como o backfill de ml_seller_id (migração 0010), o
++-- dado já estava salvo o tempo todo dentro de raw_order_payload (o pedido
++-- bruto tem "payments": [{"id": ...}]) — não é uma suposição, é o ID real
++-- do pagamento desse pedido.
++UPDATE "sales"
++SET "ml_payment_id" = "pending_sales"."raw_order_payload" -> 'payments' -> 0 ->> 'id'
++FROM "pending_sales"
++WHERE "sales"."id" = "pending_sales"."resulting_sale_id"
++  AND "sales"."ml_payment_id" IS NULL
++  AND "pending_sales"."raw_order_payload" -> 'payments' -> 0 ->> 'id' IS NOT NULL;
+diff --git a/drizzle/meta/0011_snapshot.json b/drizzle/meta/0011_snapshot.json
+new file mode 100644
+index 0000000..8c78f44
+--- /dev/null
++++ b/drizzle/meta/0011_snapshot.json
+@@ -0,0 +1,850 @@
++{
++  "id": "7581809e-c109-4364-9859-7dea39ae51e2",
++  "prevId": "54e247a3-dcb5-48f6-8286-b0ddd75a9f0b",
++  "version": "7",
++  "dialect": "postgresql",
++  "tables": {
++    "public.mercadolivre_credentials": {
++      "name": "mercadolivre_credentials",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "ml_user_id": {
++          "name": "ml_user_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "nickname": {
++          "name": "nickname",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "access_token": {
++          "name": "access_token",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "refresh_token": {
++          "name": "refresh_token",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "expires_at": {
++          "name": "expires_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "scope": {
++          "name": "scope",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {},
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "mercadolivre_credentials_ml_user_id_unique": {
++          "name": "mercadolivre_credentials_ml_user_id_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "ml_user_id"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.monthly_goals": {
++      "name": "monthly_goals",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "year_month": {
++          "name": "year_month",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "goal_value": {
++          "name": "goal_value",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {},
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "monthly_goals_year_month_unique": {
++          "name": "monthly_goals_year_month_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "year_month"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.pending_sales": {
++      "name": "pending_sales",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "ml_order_id": {
++          "name": "ml_order_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_order_item_id": {
++          "name": "ml_order_item_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_seller_id": {
++          "name": "ml_seller_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_pack_id": {
++          "name": "ml_pack_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "title_snapshot": {
++          "name": "title_snapshot",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "quantity": {
++          "name": "quantity",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true,
++          "default": 1
++        },
++        "unit_price_snapshot": {
++          "name": "unit_price_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_sale_fee_snapshot": {
++          "name": "ml_sale_fee_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_shipping_cost_snapshot": {
++          "name": "ml_shipping_cost_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "order_date": {
++          "name": "order_date",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "order_status_ml": {
++          "name": "order_status_ml",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "buyer_nickname": {
++          "name": "buyer_nickname",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "buyer_full_name": {
++          "name": "buyer_full_name",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "raw_order_payload": {
++          "name": "raw_order_payload",
++          "type": "jsonb",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "status": {
++          "name": "status",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'pendente'"
++        },
++        "matched_product_id": {
++          "name": "matched_product_id",
++          "type": "uuid",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "product_cost_manual": {
++          "name": "product_cost_manual",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "dispatched_by": {
++          "name": "dispatched_by",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "resulting_sale_id": {
++          "name": "resulting_sale_id",
++          "type": "uuid",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {
++        "pending_sales_status_idx": {
++          "name": "pending_sales_status_idx",
++          "columns": [
++            {
++              "expression": "status",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        }
++      },
++      "foreignKeys": {
++        "pending_sales_matched_product_id_products_id_fk": {
++          "name": "pending_sales_matched_product_id_products_id_fk",
++          "tableFrom": "pending_sales",
++          "tableTo": "products",
++          "columnsFrom": [
++            "matched_product_id"
++          ],
++          "columnsTo": [
++            "id"
++          ],
++          "onDelete": "set null",
++          "onUpdate": "no action"
++        },
++        "pending_sales_resulting_sale_id_sales_id_fk": {
++          "name": "pending_sales_resulting_sale_id_sales_id_fk",
++          "tableFrom": "pending_sales",
++          "tableTo": "sales",
++          "columnsFrom": [
++            "resulting_sale_id"
++          ],
++          "columnsTo": [
++            "id"
++          ],
++          "onDelete": "set null",
++          "onUpdate": "no action"
++        }
++      },
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "pending_sales_order_item_unique": {
++          "name": "pending_sales_order_item_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "ml_order_id",
++            "ml_order_item_id"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.products": {
++      "name": "products",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "internal_code": {
++          "name": "internal_code",
++          "type": "serial",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "name": {
++          "name": "name",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "image_url": {
++          "name": "image_url",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "is_kit": {
++          "name": "is_kit",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true,
++          "default": false
++        },
++        "kit_quantity": {
++          "name": "kit_quantity",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true,
++          "default": 1
++        },
++        "unit_price": {
++          "name": "unit_price",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "sale_fee_type": {
++          "name": "sale_fee_type",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'percentual'"
++        },
++        "sale_fee_value": {
++          "name": "sale_fee_value",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "free_shipping": {
++          "name": "free_shipping",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true,
++          "default": false
++        },
++        "shipping_cost": {
++          "name": "shipping_cost",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "packaging_cost": {
++          "name": "packaging_cost",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "product_cost": {
++          "name": "product_cost",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "active": {
++          "name": "active",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true,
++          "default": true
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {
++        "products_name_idx": {
++          "name": "products_name_idx",
++          "columns": [
++            {
++              "expression": "name",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        }
++      },
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "products_internal_code_unique": {
++          "name": "products_internal_code_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "internal_code"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.sales": {
++      "name": "sales",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "product_id": {
++          "name": "product_id",
++          "type": "uuid",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "source": {
++          "name": "source",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'manual'"
++        },
++        "product_name_snapshot": {
++          "name": "product_name_snapshot",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_order_id": {
++          "name": "ml_order_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_pack_id": {
++          "name": "ml_pack_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_payment_id": {
++          "name": "ml_payment_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "buyer_nickname": {
++          "name": "buyer_nickname",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "buyer_full_name": {
++          "name": "buyer_full_name",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "quantity": {
++          "name": "quantity",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true,
++          "default": 1
++        },
++        "sale_date": {
++          "name": "sale_date",
++          "type": "date",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "order_status": {
++          "name": "order_status",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'pendente'"
++        },
++        "notes": {
++          "name": "notes",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "dispatched_by": {
++          "name": "dispatched_by",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'juan'"
++        },
++        "operational_fee_percent_snapshot": {
++          "name": "operational_fee_percent_snapshot",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'5'"
++        },
++        "reserve_percent_snapshot": {
++          "name": "reserve_percent_snapshot",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'30'"
++        },
++        "donation_percent_snapshot": {
++          "name": "donation_percent_snapshot",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'10'"
++        },
++        "unit_price_snapshot": {
++          "name": "unit_price_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "kit_quantity_snapshot": {
++          "name": "kit_quantity_snapshot",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "sale_fee_type_snapshot": {
++          "name": "sale_fee_type_snapshot",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "sale_fee_value_snapshot": {
++          "name": "sale_fee_value_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "free_shipping_snapshot": {
++          "name": "free_shipping_snapshot",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "shipping_cost_snapshot": {
++          "name": "shipping_cost_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "packaging_cost_snapshot": {
++          "name": "packaging_cost_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "product_cost_snapshot": {
++          "name": "product_cost_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_sale_fee_total_snapshot": {
++          "name": "ml_sale_fee_total_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_shipping_total_snapshot": {
++          "name": "ml_shipping_total_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "product_cost_manual_snapshot": {
++          "name": "product_cost_manual_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_seller_id": {
++          "name": "ml_seller_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "money_release_date": {
++          "name": "money_release_date",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "money_release_status": {
++          "name": "money_release_status",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "money_release_checked_at": {
++          "name": "money_release_checked_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {
++        "sales_product_id_idx": {
++          "name": "sales_product_id_idx",
++          "columns": [
++            {
++              "expression": "product_id",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        },
++        "sales_sale_date_idx": {
++          "name": "sales_sale_date_idx",
++          "columns": [
++            {
++              "expression": "sale_date",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        },
++        "sales_order_status_idx": {
++          "name": "sales_order_status_idx",
++          "columns": [
++            {
++              "expression": "order_status",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        },
++        "sales_money_release_status_idx": {
++          "name": "sales_money_release_status_idx",
++          "columns": [
++            {
++              "expression": "money_release_status",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        }
++      },
++      "foreignKeys": {
++        "sales_product_id_products_id_fk": {
++          "name": "sales_product_id_products_id_fk",
++          "tableFrom": "sales",
++          "tableTo": "products",
++          "columnsFrom": [
++            "product_id"
++          ],
++          "columnsTo": [
++            "id"
++          ],
++          "onDelete": "set null",
++          "onUpdate": "no action"
++        }
++      },
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {},
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.settings": {
++      "name": "settings",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "text",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "'default'"
++        },
++        "operational_fee_percent": {
++          "name": "operational_fee_percent",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'5'"
++        },
++        "reserve_percent": {
++          "name": "reserve_percent",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'30'"
++        },
++        "donation_percent": {
++          "name": "donation_percent",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'10'"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {},
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {},
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    }
++  },
++  "enums": {},
++  "schemas": {},
++  "sequences": {},
++  "roles": {},
++  "policies": {},
++  "views": {},
++  "_meta": {
++    "columns": {},
++    "schemas": {},
++    "tables": {}
++  }
++}
+\ No newline at end of file
+diff --git a/drizzle/meta/0012_snapshot.json b/drizzle/meta/0012_snapshot.json
+new file mode 100644
+index 0000000..83c0a3d
+--- /dev/null
++++ b/drizzle/meta/0012_snapshot.json
+@@ -0,0 +1,850 @@
++{
++  "id": "b9ce6be6-94a2-47bc-a31a-a9a96bfc3dd4",
++  "prevId": "7581809e-c109-4364-9859-7dea39ae51e2",
++  "version": "7",
++  "dialect": "postgresql",
++  "tables": {
++    "public.mercadolivre_credentials": {
++      "name": "mercadolivre_credentials",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "ml_user_id": {
++          "name": "ml_user_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "nickname": {
++          "name": "nickname",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "access_token": {
++          "name": "access_token",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "refresh_token": {
++          "name": "refresh_token",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "expires_at": {
++          "name": "expires_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "scope": {
++          "name": "scope",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {},
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "mercadolivre_credentials_ml_user_id_unique": {
++          "name": "mercadolivre_credentials_ml_user_id_unique",
++          "columns": [
++            "ml_user_id"
++          ],
++          "nullsNotDistinct": false
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.monthly_goals": {
++      "name": "monthly_goals",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "year_month": {
++          "name": "year_month",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "goal_value": {
++          "name": "goal_value",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {},
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "monthly_goals_year_month_unique": {
++          "name": "monthly_goals_year_month_unique",
++          "columns": [
++            "year_month"
++          ],
++          "nullsNotDistinct": false
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.pending_sales": {
++      "name": "pending_sales",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "ml_order_id": {
++          "name": "ml_order_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_order_item_id": {
++          "name": "ml_order_item_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_seller_id": {
++          "name": "ml_seller_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_pack_id": {
++          "name": "ml_pack_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "title_snapshot": {
++          "name": "title_snapshot",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "quantity": {
++          "name": "quantity",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true,
++          "default": 1
++        },
++        "unit_price_snapshot": {
++          "name": "unit_price_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_sale_fee_snapshot": {
++          "name": "ml_sale_fee_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_shipping_cost_snapshot": {
++          "name": "ml_shipping_cost_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "order_date": {
++          "name": "order_date",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "order_status_ml": {
++          "name": "order_status_ml",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "buyer_nickname": {
++          "name": "buyer_nickname",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "buyer_full_name": {
++          "name": "buyer_full_name",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "raw_order_payload": {
++          "name": "raw_order_payload",
++          "type": "jsonb",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "status": {
++          "name": "status",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'pendente'"
++        },
++        "matched_product_id": {
++          "name": "matched_product_id",
++          "type": "uuid",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "product_cost_manual": {
++          "name": "product_cost_manual",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "dispatched_by": {
++          "name": "dispatched_by",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "resulting_sale_id": {
++          "name": "resulting_sale_id",
++          "type": "uuid",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {
++        "pending_sales_status_idx": {
++          "name": "pending_sales_status_idx",
++          "columns": [
++            {
++              "expression": "status",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "with": {},
++          "method": "btree",
++          "concurrently": false
++        }
++      },
++      "foreignKeys": {
++        "pending_sales_matched_product_id_products_id_fk": {
++          "name": "pending_sales_matched_product_id_products_id_fk",
++          "tableFrom": "pending_sales",
++          "columnsFrom": [
++            "matched_product_id"
++          ],
++          "tableTo": "products",
++          "columnsTo": [
++            "id"
++          ],
++          "onUpdate": "no action",
++          "onDelete": "set null"
++        },
++        "pending_sales_resulting_sale_id_sales_id_fk": {
++          "name": "pending_sales_resulting_sale_id_sales_id_fk",
++          "tableFrom": "pending_sales",
++          "columnsFrom": [
++            "resulting_sale_id"
++          ],
++          "tableTo": "sales",
++          "columnsTo": [
++            "id"
++          ],
++          "onUpdate": "no action",
++          "onDelete": "set null"
++        }
++      },
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "pending_sales_order_item_unique": {
++          "name": "pending_sales_order_item_unique",
++          "columns": [
++            "ml_order_id",
++            "ml_order_item_id"
++          ],
++          "nullsNotDistinct": false
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.products": {
++      "name": "products",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "internal_code": {
++          "name": "internal_code",
++          "type": "serial",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "name": {
++          "name": "name",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "image_url": {
++          "name": "image_url",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "is_kit": {
++          "name": "is_kit",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true,
++          "default": false
++        },
++        "kit_quantity": {
++          "name": "kit_quantity",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true,
++          "default": 1
++        },
++        "unit_price": {
++          "name": "unit_price",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "sale_fee_type": {
++          "name": "sale_fee_type",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'percentual'"
++        },
++        "sale_fee_value": {
++          "name": "sale_fee_value",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "free_shipping": {
++          "name": "free_shipping",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true,
++          "default": false
++        },
++        "shipping_cost": {
++          "name": "shipping_cost",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "packaging_cost": {
++          "name": "packaging_cost",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "product_cost": {
++          "name": "product_cost",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "active": {
++          "name": "active",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true,
++          "default": true
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {
++        "products_name_idx": {
++          "name": "products_name_idx",
++          "columns": [
++            {
++              "expression": "name",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "with": {},
++          "method": "btree",
++          "concurrently": false
++        }
++      },
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "products_internal_code_unique": {
++          "name": "products_internal_code_unique",
++          "columns": [
++            "internal_code"
++          ],
++          "nullsNotDistinct": false
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.sales": {
++      "name": "sales",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "product_id": {
++          "name": "product_id",
++          "type": "uuid",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "source": {
++          "name": "source",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'manual'"
++        },
++        "product_name_snapshot": {
++          "name": "product_name_snapshot",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_order_id": {
++          "name": "ml_order_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_pack_id": {
++          "name": "ml_pack_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_payment_id": {
++          "name": "ml_payment_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "buyer_nickname": {
++          "name": "buyer_nickname",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "buyer_full_name": {
++          "name": "buyer_full_name",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "quantity": {
++          "name": "quantity",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true,
++          "default": 1
++        },
++        "sale_date": {
++          "name": "sale_date",
++          "type": "date",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "order_status": {
++          "name": "order_status",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'pendente'"
++        },
++        "notes": {
++          "name": "notes",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "dispatched_by": {
++          "name": "dispatched_by",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'juan'"
++        },
++        "operational_fee_percent_snapshot": {
++          "name": "operational_fee_percent_snapshot",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'5'"
++        },
++        "reserve_percent_snapshot": {
++          "name": "reserve_percent_snapshot",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'30'"
++        },
++        "donation_percent_snapshot": {
++          "name": "donation_percent_snapshot",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'10'"
++        },
++        "unit_price_snapshot": {
++          "name": "unit_price_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "kit_quantity_snapshot": {
++          "name": "kit_quantity_snapshot",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "sale_fee_type_snapshot": {
++          "name": "sale_fee_type_snapshot",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "sale_fee_value_snapshot": {
++          "name": "sale_fee_value_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "free_shipping_snapshot": {
++          "name": "free_shipping_snapshot",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "shipping_cost_snapshot": {
++          "name": "shipping_cost_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "packaging_cost_snapshot": {
++          "name": "packaging_cost_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "product_cost_snapshot": {
++          "name": "product_cost_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_sale_fee_total_snapshot": {
++          "name": "ml_sale_fee_total_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_shipping_total_snapshot": {
++          "name": "ml_shipping_total_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "product_cost_manual_snapshot": {
++          "name": "product_cost_manual_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_seller_id": {
++          "name": "ml_seller_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "money_release_date": {
++          "name": "money_release_date",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "money_release_status": {
++          "name": "money_release_status",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "money_release_checked_at": {
++          "name": "money_release_checked_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {
++        "sales_product_id_idx": {
++          "name": "sales_product_id_idx",
++          "columns": [
++            {
++              "expression": "product_id",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "with": {},
++          "method": "btree",
++          "concurrently": false
++        },
++        "sales_sale_date_idx": {
++          "name": "sales_sale_date_idx",
++          "columns": [
++            {
++              "expression": "sale_date",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "with": {},
++          "method": "btree",
++          "concurrently": false
++        },
++        "sales_order_status_idx": {
++          "name": "sales_order_status_idx",
++          "columns": [
++            {
++              "expression": "order_status",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "with": {},
++          "method": "btree",
++          "concurrently": false
++        },
++        "sales_money_release_status_idx": {
++          "name": "sales_money_release_status_idx",
++          "columns": [
++            {
++              "expression": "money_release_status",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "with": {},
++          "method": "btree",
++          "concurrently": false
++        }
++      },
++      "foreignKeys": {
++        "sales_product_id_products_id_fk": {
++          "name": "sales_product_id_products_id_fk",
++          "tableFrom": "sales",
++          "columnsFrom": [
++            "product_id"
++          ],
++          "tableTo": "products",
++          "columnsTo": [
++            "id"
++          ],
++          "onUpdate": "no action",
++          "onDelete": "set null"
++        }
++      },
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {},
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.settings": {
++      "name": "settings",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "text",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "'default'"
++        },
++        "operational_fee_percent": {
++          "name": "operational_fee_percent",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'5'"
++        },
++        "reserve_percent": {
++          "name": "reserve_percent",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'30'"
++        },
++        "donation_percent": {
++          "name": "donation_percent",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'10'"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {},
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {},
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    }
++  },
++  "enums": {},
++  "schemas": {},
++  "views": {},
++  "sequences": {},
++  "roles": {},
++  "policies": {},
++  "_meta": {
++    "columns": {},
++    "schemas": {},
++    "tables": {}
++  }
++}
+\ No newline at end of file
+diff --git a/drizzle/meta/_journal.json b/drizzle/meta/_journal.json
+index 06c4ce2..8c86023 100755
+--- a/drizzle/meta/_journal.json
++++ b/drizzle/meta/_journal.json
+@@ -78,6 +78,20 @@
+       "when": 1789430183101,
+       "tag": "0010_backfill_ml_seller_id",
+       "breakpoints": true
++    },
++    {
++      "idx": 11,
++      "version": "7",
++      "when": 1789431238694,
++      "tag": "0011_add_ml_payment_id",
++      "breakpoints": true
++    },
++    {
++      "idx": 12,
++      "version": "7",
++      "when": 1789431245361,
++      "tag": "0012_backfill_ml_payment_id",
++      "breakpoints": true
+     }
+   ]
+ }
+\ No newline at end of file
+diff --git a/src/actions/liberacoes.ts b/src/actions/liberacoes.ts
+index 5529f6f..5184855 100644
+--- a/src/actions/liberacoes.ts
++++ b/src/actions/liberacoes.ts
+@@ -5,7 +5,7 @@ import { and, eq, isNull, ne, or } from "drizzle-orm";
+ import { db } from "@/db";
+ import { sales } from "@/db/schema";
+ import { withFinancials, type SaleWithFinancials } from "@/lib/sale-financials";
+-import { getValidAccessTokenForAccount, fetchMoneyReleaseInfo } from "@/lib/mercadolivre";
++import { getValidAccessTokenForAccount, fetchPaymentReleaseInfo } from "@/lib/mercadolivre";
+ 
+ export type LiberacaoRow = SaleWithFinancials & { netAmount: number };
+ 
+@@ -54,34 +54,35 @@ export async function getPendingReleaseSummary(): Promise<{ count: number; total
+ }
+ 
+ /**
+- * Consulta no Mercado Livre a data/status de liberação de todas as vendas
+- * ainda não marcadas como liberadas, e atualiza o banco. Agrupa por conta
+- * vendedora (mlSellerId) porque o access_token e o lote da consulta são por
+- * conta. Vendas antigas sem mlSellerId identificado (confirmadas antes dessa
+- * coluna existir) são ignoradas — não tem como saber de qual conta usar o
+- * token.
++ * Consulta a data/status de liberação de todas as vendas ainda não marcadas
++ * como liberadas (via GET /v1/payments/$id, por mlPaymentId — não é possível
++ * consultar em lote por order_id, ver fetchPaymentReleaseInfo) e atualiza o
++ * banco. Agrupa por conta vendedora (mlSellerId) porque o access_token é por
++ * conta. Vendas sem mlSellerId e/ou mlPaymentId identificados (confirmadas
++ * antes dessas colunas existirem) são ignoradas — não tem como saber de qual
++ * conta usar o token, ou qual pagamento consultar.
+  */
+ export async function atualizarLiberacoes(): Promise<{ ok: boolean; message: string }> {
+   const rows = await db.select().from(sales).where(notReleasedCondition());
+ 
+-  const withOrderAndSeller = rows.filter(
+-    (row): row is typeof row & { mlOrderId: string; mlSellerId: string } =>
+-      Boolean(row.mlOrderId) && Boolean(row.mlSellerId)
++  const withPaymentAndSeller = rows.filter(
++    (row): row is typeof row & { mlPaymentId: string; mlSellerId: string } =>
++      Boolean(row.mlPaymentId) && Boolean(row.mlSellerId)
+   );
+-  const skippedNoSeller = rows.length - withOrderAndSeller.length;
++  const skippedIncomplete = rows.length - withPaymentAndSeller.length;
+ 
+-  if (withOrderAndSeller.length === 0) {
++  if (withPaymentAndSeller.length === 0) {
+     return {
+       ok: true,
+       message:
+-        skippedNoSeller > 0
+-          ? `Nenhuma venda pôde ser verificada: ${skippedNoSeller} venda(s) pendente(s) não tem a conta identificada (foram confirmadas antes desse recurso existir).`
++        skippedIncomplete > 0
++          ? `Nenhuma venda pôde ser verificada: ${skippedIncomplete} venda(s) pendente(s) sem conta e/ou pagamento identificado.`
+           : "Nenhuma venda pendente de liberação para atualizar.",
+     };
+   }
+ 
+-  const bySeller = new Map<string, typeof withOrderAndSeller>();
+-  for (const row of withOrderAndSeller) {
++  const bySeller = new Map<string, typeof withPaymentAndSeller>();
++  for (const row of withPaymentAndSeller) {
+     const list = bySeller.get(row.mlSellerId) ?? [];
+     list.push(row);
+     bySeller.set(row.mlSellerId, list);
+@@ -94,11 +95,11 @@ export async function atualizarLiberacoes(): Promise<{ ok: boolean; message: str
+   for (const [sellerId, sellerRows] of bySeller) {
+     try {
+       const accessToken = await getValidAccessTokenForAccount(sellerId);
+-      const orderIds = Array.from(new Set(sellerRows.map((r) => r.mlOrderId)));
+-      const info = await fetchMoneyReleaseInfo(orderIds, accessToken);
++      const paymentIds = Array.from(new Set(sellerRows.map((r) => r.mlPaymentId)));
++      const info = await fetchPaymentReleaseInfo(paymentIds, accessToken);
+ 
+       for (const row of sellerRows) {
+-        const releaseInfo = info.get(row.mlOrderId);
++        const releaseInfo = info.get(row.mlPaymentId);
+         if (!releaseInfo) continue;
+         await db
+           .update(sales)
+@@ -120,7 +121,7 @@ export async function atualizarLiberacoes(): Promise<{ ok: boolean; message: str
+   revalidatePath("/liberacoes");
+   revalidatePath("/");
+ 
+-  const skippedNote = skippedNoSeller > 0 ? ` (${skippedNoSeller} sem conta identificada, ignorada(s))` : "";
++  const skippedNote = skippedIncomplete > 0 ? ` (${skippedIncomplete} sem conta/pagamento identificado, ignorada(s))` : "";
+   if (errors.length > 0) {
+     return {
+       ok: updated > 0,
+diff --git a/src/actions/mercadolivre.ts b/src/actions/mercadolivre.ts
+index 00319ab..87e79ee 100644
+--- a/src/actions/mercadolivre.ts
++++ b/src/actions/mercadolivre.ts
+@@ -18,6 +18,24 @@ import type { ActionResult } from "@/actions/products";
+ 
+ export { listConnections };
+ 
++/**
++ * Extrai o ID do primeiro pagamento do payload bruto do pedido (salvo em
++ * pending_sales.raw_order_payload), pra guardar em sales.mlPaymentId — é por
++ * esse ID, não pelo order_id, que dá pra consultar a liberação do dinheiro
++ * em GET /v1/payments/$id (ver actions/liberacoes.ts). Não faz uma chamada
++ * nova à API: o payload do pedido já tem esse dado desde que foi
++ * sincronizado/recebido pelo webhook.
++ */
++function extractFirstPaymentId(rawOrderPayload: unknown): string | null {
++  if (!rawOrderPayload || typeof rawOrderPayload !== "object") return null;
++  const payments = (rawOrderPayload as { payments?: unknown }).payments;
++  if (!Array.isArray(payments) || payments.length === 0) return null;
++  const first = payments[0];
++  if (!first || typeof first !== "object") return null;
++  const id = (first as { id?: unknown }).id;
++  return id !== undefined && id !== null ? String(id) : null;
++}
++
+ /**
+  * Busca manualmente os pedidos mais recentes de UMA conta específica direto
+  * na API do Mercado Livre e atualiza /pendentes — rede de segurança para o
+@@ -143,6 +161,7 @@ export async function confirmPendingSale(
+       productNameSnapshot: pending.titleSnapshot,
+       mlOrderId: pending.mlOrderId,
+       mlSellerId: pending.mlSellerId,
++      mlPaymentId: extractFirstPaymentId(pending.rawOrderPayload),
+       mlPackId: pending.mlPackId,
+       buyerNickname: pending.buyerNickname,
+       buyerFullName: pending.buyerFullName,
+diff --git a/src/db/schema.ts b/src/db/schema.ts
+index f7f4605..d6edb47 100755
+--- a/src/db/schema.ts
++++ b/src/db/schema.ts
+@@ -112,6 +112,12 @@ export const sales = pgTable(
+     // para vendas manuais).
+     mlOrderId: text("ml_order_id"),
+     mlPackId: text("ml_pack_id"),
++    // ID do pagamento do Mercado Pago associado a esse pedido
++    // (order.payments[0].id) — é por esse ID, não pelo order_id, que dá pra
++    // consultar a liberação do dinheiro em GET /v1/payments/$id (ver
++    // /liberacoes). Pedidos com mais de um pagamento (raro) só guardam o
++    // primeiro.
++    mlPaymentId: text("ml_payment_id"),
+     buyerNickname: text("buyer_nickname"),
+     buyerFullName: text("buyer_full_name"),
+ 
+diff --git a/src/lib/mercadolivre.ts b/src/lib/mercadolivre.ts
+index f96c4af..adfe598 100644
+--- a/src/lib/mercadolivre.ts
++++ b/src/lib/mercadolivre.ts
+@@ -259,6 +259,12 @@ export interface MlOrder {
+   buyer?: {
+     nickname?: string;
+   };
++  // Pagamento(s) do Mercado Pago associados ao pedido — usamos só o id do
++  // primeiro (payments[0].id) pra depois consultar a liberação do dinheiro
++  // em GET /v1/payments/$id (ver upsertPendingSalesFromOrder e
++  // fetchPaymentReleaseInfo). Pedidos com mais de um pagamento (raro) não
++  // são tratados especialmente — só o primeiro é guardado.
++  payments?: Array<{ id: number }>;
+   // A Order só traz o ID do envio (não existe mais "shipping.cost" nessa
+   // resposta, mesmo em pedidos antigos que pareciam ter esse campo). Para
+   // saber quanto o Mercado Livre efetivamente cobra do vendedor pelo frete
+@@ -505,93 +511,70 @@ export interface MoneyReleaseInfo {
+   moneyReleaseStatus: string | null;
+ }
+ 
+-/**
+- * Procura recursivamente, em qualquer nível da resposta, por objetos que
+- * tenham money_release_date/money_release_status e associa ao order_id mais
+- * próximo (do próprio objeto, ou herdado de um nível acima). O formato exato
+- * da resposta de /billing/integration/group/ML/order/details não é
+- * documentado publicamente — em vez de assumir um único formato fixo (ex.:
+- * sempre um array "payment_info" no nível raiz) e quebrar silenciosamente se
+- * o Mercado Livre aninhar diferente, essa busca tolerante reconhece o dado
+- * onde quer que ele esteja.
+- */
+-function collectMoneyReleaseInfo(
+-  node: unknown,
+-  inheritedOrderId: string | undefined,
+-  result: Map<string, MoneyReleaseInfo>
+-): void {
+-  if (Array.isArray(node)) {
+-    for (const item of node) collectMoneyReleaseInfo(item, inheritedOrderId, result);
+-    return;
+-  }
+-  if (!node || typeof node !== "object") return;
+-
+-  const obj = node as Record<string, unknown>;
+-  const rawOrderId = obj.order_id ?? obj.orderId;
+-  const orderId = rawOrderId !== undefined && rawOrderId !== null ? String(rawOrderId) : inheritedOrderId;
++interface MlPaymentResource {
++  id: number;
++  money_release_date?: string | null;
++  money_release_status?: string | null;
++}
+ 
+-  if (orderId && ("money_release_date" in obj || "money_release_status" in obj)) {
+-    result.set(orderId, {
+-      moneyReleaseDate:
+-        typeof obj.money_release_date === "string" ? new Date(obj.money_release_date) : null,
+-      moneyReleaseStatus: typeof obj.money_release_status === "string" ? obj.money_release_status : null,
++// Tentamos primeiro /billing/integration/group/ML/order/details (endpoint do
++// próprio Mercado Livre, por order_id, em lote) — mas confirmado em teste
++// real que esse endpoint devolve 403 PA_UNAUTHORIZED_RESULT_FROM_POLICIES
++// pra esse aplicativo (precisa de uma permissão que não temos). O que
++// FUNCIONA, confirmado também em teste real com o access_token do vendedor,
++// é o recurso de pagamento do Mercado Pago (GET /v1/payments/$id, o mesmo
++// domínio da API de Pagamentos) — ele tem os campos money_release_date e
++// money_release_status direto na raiz da resposta, sem precisar de nenhuma
++// credencial separada do Mercado Pago. A limitação é que só existe por
++// pagamento (não em lote por vários IDs de uma vez), por isso
++// fetchPaymentReleaseInfo faz uma chamada por pagamento, em pequenos lotes
++// paralelos.
++const PAYMENT_LOOKUP_CONCURRENCY = 8;
++
++async function fetchSinglePaymentRelease(
++  paymentId: string,
++  accessToken: string
++): Promise<MoneyReleaseInfo | null> {
++  try {
++    const response = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
++      headers: { Authorization: `Bearer ${accessToken}` },
+     });
+-  }
+-
+-  for (const value of Object.values(obj)) {
+-    collectMoneyReleaseInfo(value, orderId, result);
++    if (!response.ok) {
++      const text = await response.text().catch(() => "");
++      console.error(`[liberacoes] falha ao consultar pagamento ${paymentId} (${response.status}): ${text}`);
++      return null;
++    }
++    const body = (await response.json()) as MlPaymentResource;
++    return {
++      moneyReleaseDate: body.money_release_date ? new Date(body.money_release_date) : null,
++      moneyReleaseStatus: body.money_release_status ?? null,
++    };
++  } catch (err) {
++    console.error(`[liberacoes] erro de rede ao consultar pagamento ${paymentId}:`, err);
++    return null;
+   }
+ }
+ 
+ /**
+- * Consulta, para pedidos de UM MESMO vendedor, a data e o status de
+- * liberação do dinheiro na conta do Mercado Livre — usa o mesmo access_token
+- * da venda (endpoint de billing do próprio Mercado Livre), sem precisar de
+- * credenciais separadas do Mercado Pago. Processa em lotes de até 60 pedidos
+- * (limite do endpoint). Pedidos que não vierem na resposta (ex.: ainda não
+- * processados pelo Mercado Livre) simplesmente ficam de fora do Map
+- * retornado — quem chamar decide o que fazer nesse caso.
+- *
+- * Se uma resposta não tiver nenhuma informação reconhecível, registra o
+- * payload bruto no log (em vez de falhar silenciosamente) para facilitar
+- * ajustar o parsing rapidamente caso o Mercado Livre mude o formato.
++ * Consulta, para uma lista de IDs de pagamento (não de pedido — ver
++ * `sales.mlPaymentId`) de UM MESMO vendedor, a data e o status de liberação
++ * do dinheiro. Processa em pequenos lotes paralelos (não existe consulta em
++ * lote nesse endpoint). Pagamentos que falharem na consulta simplesmente
++ * ficam de fora do Map retornado — quem chamar decide o que fazer.
+  */
+-export async function fetchMoneyReleaseInfo(
+-  orderIds: string[],
++export async function fetchPaymentReleaseInfo(
++  paymentIds: string[],
+   accessToken: string
+ ): Promise<Map<string, MoneyReleaseInfo>> {
+   const result = new Map<string, MoneyReleaseInfo>();
+-  const BATCH_SIZE = 60;
+-
+-  for (let i = 0; i < orderIds.length; i += BATCH_SIZE) {
+-    const batch = orderIds.slice(i, i + BATCH_SIZE);
+-    const url = new URL(`${ML_API_BASE}/billing/integration/group/ML/order/details`);
+-    url.searchParams.set("order_ids", batch.join(","));
+ 
+-    let body: unknown;
+-    try {
+-      const response = await fetch(url.toString(), {
+-        headers: { Authorization: `Bearer ${accessToken}` },
+-      });
+-      if (!response.ok) {
+-        const text = await response.text().catch(() => "");
+-        console.error(`[liberacoes] falha ao consultar liberação (${response.status}): ${text}`);
+-        continue;
+-      }
+-      body = await response.json();
+-    } catch (err) {
+-      console.error("[liberacoes] erro de rede ao consultar liberação:", err);
+-      continue;
+-    }
+-
+-    const sizeBefore = result.size;
+-    collectMoneyReleaseInfo(body, undefined, result);
+-    if (result.size === sizeBefore) {
+-      console.error(
+-        "[liberacoes] nenhuma informação de liberação reconhecida na resposta, payload bruto:",
+-        JSON.stringify(body).slice(0, 3000)
+-      );
+-    }
++  for (let i = 0; i < paymentIds.length; i += PAYMENT_LOOKUP_CONCURRENCY) {
++    const batch = paymentIds.slice(i, i + PAYMENT_LOOKUP_CONCURRENCY);
++    const infos = await Promise.all(batch.map((id) => fetchSinglePaymentRelease(id, accessToken)));
++    batch.forEach((id, idx) => {
++      const info = infos[idx];
++      if (info) result.set(id, info);
++    });
+   }
+ 
+   return result;
+-- 
+2.43.0
+

@@ -259,6 +259,12 @@ export interface MlOrder {
   buyer?: {
     nickname?: string;
   };
+  // Pagamento(s) do Mercado Pago associados ao pedido — usamos só o id do
+  // primeiro (payments[0].id) pra depois consultar a liberação do dinheiro
+  // em GET /v1/payments/$id (ver upsertPendingSalesFromOrder e
+  // fetchPaymentReleaseInfo). Pedidos com mais de um pagamento (raro) não
+  // são tratados especialmente — só o primeiro é guardado.
+  payments?: Array<{ id: number }>;
   // A Order só traz o ID do envio (não existe mais "shipping.cost" nessa
   // resposta, mesmo em pedidos antigos que pareciam ter esse campo). Para
   // saber quanto o Mercado Livre efetivamente cobra do vendedor pelo frete
@@ -505,93 +511,70 @@ export interface MoneyReleaseInfo {
   moneyReleaseStatus: string | null;
 }
 
-/**
- * Procura recursivamente, em qualquer nível da resposta, por objetos que
- * tenham money_release_date/money_release_status e associa ao order_id mais
- * próximo (do próprio objeto, ou herdado de um nível acima). O formato exato
- * da resposta de /billing/integration/group/ML/order/details não é
- * documentado publicamente — em vez de assumir um único formato fixo (ex.:
- * sempre um array "payment_info" no nível raiz) e quebrar silenciosamente se
- * o Mercado Livre aninhar diferente, essa busca tolerante reconhece o dado
- * onde quer que ele esteja.
- */
-function collectMoneyReleaseInfo(
-  node: unknown,
-  inheritedOrderId: string | undefined,
-  result: Map<string, MoneyReleaseInfo>
-): void {
-  if (Array.isArray(node)) {
-    for (const item of node) collectMoneyReleaseInfo(item, inheritedOrderId, result);
-    return;
-  }
-  if (!node || typeof node !== "object") return;
+interface MlPaymentResource {
+  id: number;
+  money_release_date?: string | null;
+  money_release_status?: string | null;
+}
 
-  const obj = node as Record<string, unknown>;
-  const rawOrderId = obj.order_id ?? obj.orderId;
-  const orderId = rawOrderId !== undefined && rawOrderId !== null ? String(rawOrderId) : inheritedOrderId;
+// Tentamos primeiro /billing/integration/group/ML/order/details (endpoint do
+// próprio Mercado Livre, por order_id, em lote) — mas confirmado em teste
+// real que esse endpoint devolve 403 PA_UNAUTHORIZED_RESULT_FROM_POLICIES
+// pra esse aplicativo (precisa de uma permissão que não temos). O que
+// FUNCIONA, confirmado também em teste real com o access_token do vendedor,
+// é o recurso de pagamento do Mercado Pago (GET /v1/payments/$id, o mesmo
+// domínio da API de Pagamentos) — ele tem os campos money_release_date e
+// money_release_status direto na raiz da resposta, sem precisar de nenhuma
+// credencial separada do Mercado Pago. A limitação é que só existe por
+// pagamento (não em lote por vários IDs de uma vez), por isso
+// fetchPaymentReleaseInfo faz uma chamada por pagamento, em pequenos lotes
+// paralelos.
+const PAYMENT_LOOKUP_CONCURRENCY = 8;
 
-  if (orderId && ("money_release_date" in obj || "money_release_status" in obj)) {
-    result.set(orderId, {
-      moneyReleaseDate:
-        typeof obj.money_release_date === "string" ? new Date(obj.money_release_date) : null,
-      moneyReleaseStatus: typeof obj.money_release_status === "string" ? obj.money_release_status : null,
+async function fetchSinglePaymentRelease(
+  paymentId: string,
+  accessToken: string
+): Promise<MoneyReleaseInfo | null> {
+  try {
+    const response = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
-  }
-
-  for (const value of Object.values(obj)) {
-    collectMoneyReleaseInfo(value, orderId, result);
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      console.error(`[liberacoes] falha ao consultar pagamento ${paymentId} (${response.status}): ${text}`);
+      return null;
+    }
+    const body = (await response.json()) as MlPaymentResource;
+    return {
+      moneyReleaseDate: body.money_release_date ? new Date(body.money_release_date) : null,
+      moneyReleaseStatus: body.money_release_status ?? null,
+    };
+  } catch (err) {
+    console.error(`[liberacoes] erro de rede ao consultar pagamento ${paymentId}:`, err);
+    return null;
   }
 }
 
 /**
- * Consulta, para pedidos de UM MESMO vendedor, a data e o status de
- * liberação do dinheiro na conta do Mercado Livre — usa o mesmo access_token
- * da venda (endpoint de billing do próprio Mercado Livre), sem precisar de
- * credenciais separadas do Mercado Pago. Processa em lotes de até 60 pedidos
- * (limite do endpoint). Pedidos que não vierem na resposta (ex.: ainda não
- * processados pelo Mercado Livre) simplesmente ficam de fora do Map
- * retornado — quem chamar decide o que fazer nesse caso.
- *
- * Se uma resposta não tiver nenhuma informação reconhecível, registra o
- * payload bruto no log (em vez de falhar silenciosamente) para facilitar
- * ajustar o parsing rapidamente caso o Mercado Livre mude o formato.
+ * Consulta, para uma lista de IDs de pagamento (não de pedido — ver
+ * `sales.mlPaymentId`) de UM MESMO vendedor, a data e o status de liberação
+ * do dinheiro. Processa em pequenos lotes paralelos (não existe consulta em
+ * lote nesse endpoint). Pagamentos que falharem na consulta simplesmente
+ * ficam de fora do Map retornado — quem chamar decide o que fazer.
  */
-export async function fetchMoneyReleaseInfo(
-  orderIds: string[],
+export async function fetchPaymentReleaseInfo(
+  paymentIds: string[],
   accessToken: string
 ): Promise<Map<string, MoneyReleaseInfo>> {
   const result = new Map<string, MoneyReleaseInfo>();
-  const BATCH_SIZE = 60;
 
-  for (let i = 0; i < orderIds.length; i += BATCH_SIZE) {
-    const batch = orderIds.slice(i, i + BATCH_SIZE);
-    const url = new URL(`${ML_API_BASE}/billing/integration/group/ML/order/details`);
-    url.searchParams.set("order_ids", batch.join(","));
-
-    let body: unknown;
-    try {
-      const response = await fetch(url.toString(), {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      if (!response.ok) {
-        const text = await response.text().catch(() => "");
-        console.error(`[liberacoes] falha ao consultar liberação (${response.status}): ${text}`);
-        continue;
-      }
-      body = await response.json();
-    } catch (err) {
-      console.error("[liberacoes] erro de rede ao consultar liberação:", err);
-      continue;
-    }
-
-    const sizeBefore = result.size;
-    collectMoneyReleaseInfo(body, undefined, result);
-    if (result.size === sizeBefore) {
-      console.error(
-        "[liberacoes] nenhuma informação de liberação reconhecida na resposta, payload bruto:",
-        JSON.stringify(body).slice(0, 3000)
-      );
-    }
+  for (let i = 0; i < paymentIds.length; i += PAYMENT_LOOKUP_CONCURRENCY) {
+    const batch = paymentIds.slice(i, i + PAYMENT_LOOKUP_CONCURRENCY);
+    const infos = await Promise.all(batch.map((id) => fetchSinglePaymentRelease(id, accessToken)));
+    batch.forEach((id, idx) => {
+      const info = infos[idx];
+      if (info) result.set(id, info);
+    });
   }
 
   return result;

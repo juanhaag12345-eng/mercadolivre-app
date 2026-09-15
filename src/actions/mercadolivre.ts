@@ -19,6 +19,24 @@ import type { ActionResult } from "@/actions/products";
 export { listConnections };
 
 /**
+ * Extrai o ID do primeiro pagamento do payload bruto do pedido (salvo em
+ * pending_sales.raw_order_payload), pra guardar em sales.mlPaymentId — é por
+ * esse ID, não pelo order_id, que dá pra consultar a liberação do dinheiro
+ * em GET /v1/payments/$id (ver actions/liberacoes.ts). Não faz uma chamada
+ * nova à API: o payload do pedido já tem esse dado desde que foi
+ * sincronizado/recebido pelo webhook.
+ */
+function extractFirstPaymentId(rawOrderPayload: unknown): string | null {
+  if (!rawOrderPayload || typeof rawOrderPayload !== "object") return null;
+  const payments = (rawOrderPayload as { payments?: unknown }).payments;
+  if (!Array.isArray(payments) || payments.length === 0) return null;
+  const first = payments[0];
+  if (!first || typeof first !== "object") return null;
+  const id = (first as { id?: unknown }).id;
+  return id !== undefined && id !== null ? String(id) : null;
+}
+
+/**
  * Busca manualmente os pedidos mais recentes de UMA conta específica direto
  * na API do Mercado Livre e atualiza /pendentes — rede de segurança para o
  * caso do webhook não ter recebido (ou ainda não receber) a notificação de
@@ -143,6 +161,7 @@ export async function confirmPendingSale(
       productNameSnapshot: pending.titleSnapshot,
       mlOrderId: pending.mlOrderId,
       mlSellerId: pending.mlSellerId,
+      mlPaymentId: extractFirstPaymentId(pending.rawOrderPayload),
       mlPackId: pending.mlPackId,
       buyerNickname: pending.buyerNickname,
       buyerFullName: pending.buyerFullName,

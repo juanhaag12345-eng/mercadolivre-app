@@ -112,6 +112,12 @@ export const sales = pgTable(
     // para vendas manuais).
     mlOrderId: text("ml_order_id"),
     mlPackId: text("ml_pack_id"),
+    // ID do pagamento do Mercado Pago associado a esse pedido
+    // (order.payments[0].id) — é por esse ID, não pelo order_id, que dá pra
+    // consultar a liberação do dinheiro em GET /v1/payments/$id (ver
+    // /liberacoes). Pedidos com mais de um pagamento (raro) só guardam o
+    // primeiro.
+    mlPaymentId: text("ml_payment_id"),
     buyerNickname: text("buyer_nickname"),
     buyerFullName: text("buyer_full_name"),
 
