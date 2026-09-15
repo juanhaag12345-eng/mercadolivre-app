@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { PackageSearch } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { SaleStatusSelect, DeleteSaleButton } from "@/components/sales/SaleRowActions";
@@ -55,10 +56,12 @@ export function SalesTable({ sales }: { sales: SaleListRow[] }) {
             {sales.map((sale) => (
               <tr key={sale.id} className="border-b border-border last:border-0 hover:bg-surface-muted/40">
                 <td className="px-5 py-3 font-medium max-w-[220px] truncate">
-                  {sale.productInternalCode !== null && (
-                    <span className="text-muted font-mono">#{sale.productInternalCode} </span>
-                  )}
-                  {sale.productNameSnapshot}
+                  <Link href={`/vendas/${sale.id}`} className="hover:underline hover:text-accent">
+                    {sale.productInternalCode !== null && (
+                      <span className="text-muted font-mono">#{sale.productInternalCode} </span>
+                    )}
+                    {sale.productNameSnapshot}
+                  </Link>
                 </td>
                 <td className="px-3 py-3 text-muted whitespace-nowrap">{formatDate(sale.saleDate)}</td>
                 <td className="px-3 py-3 text-muted">{sale.quantity}</td>

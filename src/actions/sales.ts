@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
 import { db } from "@/db";
 import { products, sales, type OrderStatus } from "@/db/schema";
-import { saleSchema } from "@/lib/validations";
+import { saleSchema, updateManualSaleSchema, updateMercadolivreSaleSchema } from "@/lib/validations";
 import { toNumber } from "@/lib/calculations";
 import { withFinancials } from "@/lib/sale-financials";
 import { getSettings } from "@/actions/settings";
@@ -142,6 +142,102 @@ export async function deleteSale(id: string) {
 export async function getSale(id: string) {
   const rows = await db.select().from(sales).where(eq(sales.id, id)).limit(1);
   return rows[0] ? withFinancials(rows[0]) : null;
+}
+
+function flattenZodErrors(error: import("zod").ZodError): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const issue of error.issues) {
+    const key = issue.path.join(".") || "form";
+    if (!out[key]) out[key] = issue.message;
+  }
+  return out;
+}
+
+/**
+ * Atualiza uma venda já registrada (tela de detalhe em /vendas/[id]). Os
+ * campos editáveis dependem da origem da venda: uma venda manual permite
+ * editar todos os valores financeiros (preço, taxa, frete, embalagem, custo
+ * do produto) porque eles são reconstruídos a partir de um cadastro; uma
+ * venda do Mercado Livre só permite editar o custo do produto, porque
+ * receita/tarifa/frete são valores reais que vieram prontos do Mercado
+ * Livre no momento da confirmação (ver withFinancials/mercadolivreBreakdown)
+ * — mudar essas colunas manualmente as tornaria inconsistentes com o pedido
+ * de origem.
+ */
+export async function updateSale(
+  id: string,
+  _prevState: ActionResult | null,
+  formData: FormData
+): Promise<ActionResult> {
+  const [existing] = await db.select().from(sales).where(eq(sales.id, id)).limit(1);
+  if (!existing) {
+    return { ok: false, errors: { form: "Essa venda não existe mais." } };
+  }
+
+  const commonRaw = {
+    quantity: Number(formData.get("quantity") ?? 1),
+    saleDate: String(formData.get("saleDate") ?? ""),
+    orderStatus: String(formData.get("orderStatus") ?? "pendente"),
+    dispatchedBy: String(formData.get("dispatchedBy") ?? ""),
+    notes: String(formData.get("notes") ?? ""),
+  };
+
+  if (existing.source === "mercadolivre") {
+    const parsed = updateMercadolivreSaleSchema.safeParse({
+      ...commonRaw,
+      productCostManual: String(formData.get("productCostManual") ?? "0"),
+    });
+    if (!parsed.success) return { ok: false, errors: flattenZodErrors(parsed.error) };
+    const values = parsed.data;
+
+    await db
+      .update(sales)
+      .set({
+        quantity: values.quantity,
+        saleDate: values.saleDate,
+        orderStatus: values.orderStatus,
+        dispatchedBy: values.dispatchedBy,
+        notes: values.notes || null,
+        productCostManualSnapshot: values.productCostManual.toFixed(2),
+        updatedAt: new Date(),
+      })
+      .where(eq(sales.id, id));
+  } else {
+    const parsed = updateManualSaleSchema.safeParse({
+      ...commonRaw,
+      unitPriceSnapshot: String(formData.get("unitPriceSnapshot") ?? "0"),
+      saleFeeType: String(formData.get("saleFeeType") ?? "percentual"),
+      saleFeeValue: String(formData.get("saleFeeValue") ?? "0"),
+      shippingCost: String(formData.get("shippingCost") ?? "0"),
+      packagingCost: String(formData.get("packagingCost") ?? "0"),
+      productCost: String(formData.get("productCost") ?? "0"),
+    });
+    if (!parsed.success) return { ok: false, errors: flattenZodErrors(parsed.error) };
+    const values = parsed.data;
+
+    await db
+      .update(sales)
+      .set({
+        quantity: values.quantity,
+        saleDate: values.saleDate,
+        orderStatus: values.orderStatus,
+        dispatchedBy: values.dispatchedBy,
+        notes: values.notes || null,
+        unitPriceSnapshot: values.unitPriceSnapshot.toString(),
+        saleFeeTypeSnapshot: values.saleFeeType,
+        saleFeeValueSnapshot: values.saleFeeValue.toString(),
+        shippingCostSnapshot: values.shippingCost.toString(),
+        packagingCostSnapshot: values.packagingCost.toString(),
+        productCostSnapshot: values.productCost.toString(),
+        updatedAt: new Date(),
+      })
+      .where(eq(sales.id, id));
+  }
+
+  revalidatePath("/vendas");
+  revalidatePath(`/vendas/${id}`);
+  revalidatePath("/");
+  redirect(`/vendas/${id}?atualizado=1`);
 }
 
 // ---- Agregações para o dashboard ----
