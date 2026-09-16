@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import { LayoutDashboard } from "lucide-react";
 import "./globals.css";
-import { SidebarNav, BottomNav } from "@/components/nav/NavLinks";
+import { SidebarNav, MobileNav } from "@/components/nav/NavLinks";
 
 export const metadata: Metadata = {
   title: "Painel de Vendas",
@@ -35,16 +35,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           </aside>
 
           <div className="flex-1 flex flex-col min-w-0">
-            <header className="md:hidden flex items-center gap-2 border-b border-border bg-surface px-4 py-3 sticky top-0 z-30">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand text-neutral-900">
-                <LayoutDashboard size={16} strokeWidth={2.5} />
-              </span>
-              <p className="text-sm font-bold">Painel de Vendas</p>
-            </header>
-            <main className="flex-1 min-w-0 pb-20 md:pb-0">{children}</main>
+            <MobileNav />
+            <main className="flex-1 min-w-0">{children}</main>
           </div>
         </div>
-        <BottomNav />
       </body>
     </html>
   );
