@@ -566,6 +566,10 @@ export const nfePendentes = pgTable(
       enum: PAYMENT_METHODS,
     }),
     itens: jsonb("itens").$type<NfeItemParsed[]>().notNull(),
+    // XML bruto do anexo, guardado pra permitir baixar a nota original na
+    // tela (notas de antes dessa coluna existir ficam com null aqui — o
+    // botão de download simplesmente não aparece pra elas).
+    xmlConteudo: text("xml_conteudo"),
     status: text("status", { enum: NFE_PENDENTE_STATUSES })
       .notNull()
       .default("pendente"),

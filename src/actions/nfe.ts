@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { nfeEmailAccounts, nfePendentes, stockPurchases, type NfeItemParsed } from "@/db/schema";
 import { approveNfeSchema } from "@/lib/validations";
@@ -12,13 +12,40 @@ export async function listEmailAccounts() {
   return db.select().from(nfeEmailAccounts).orderBy(nfeEmailAccounts.email);
 }
 
+// Junta com a conta de e-mail pra mostrar em qual caixa cada nota chegou —
+// importante assim que tiver mais de uma conta conectada, pra saber de
+// onde veio sem precisar adivinhar pelo fornecedor.
 export async function listNfePendentes() {
   return db
-    .select()
+    .select({
+      id: nfePendentes.id,
+      emailAccountId: nfePendentes.emailAccountId,
+      gmailMessageId: nfePendentes.gmailMessageId,
+      fornecedorCnpj: nfePendentes.fornecedorCnpj,
+      fornecedorNome: nfePendentes.fornecedorNome,
+      numeroNota: nfePendentes.numeroNota,
+      serieNota: nfePendentes.serieNota,
+      dataEmissao: nfePendentes.dataEmissao,
+      valorTotal: nfePendentes.valorTotal,
+      formaPagamentoSugerida: nfePendentes.formaPagamentoSugerida,
+      itens: nfePendentes.itens,
+      // Não trazemos o XML inteiro pra tela (só usado no download, direto
+      // do banco em /api/email-nfe/nota/[id]/xml) — só se ele existe, pra
+      // decidir se mostra o botão de baixar.
+      temXml: sql<boolean>`${nfePendentes.xmlConteudo} is not null`,
+      status: nfePendentes.status,
+      erro: nfePendentes.erro,
+      recebidaEm: nfePendentes.recebidaEm,
+      processadaEm: nfePendentes.processadaEm,
+      contaEmail: nfeEmailAccounts.email,
+    })
     .from(nfePendentes)
+    .innerJoin(nfeEmailAccounts, eq(nfePendentes.emailAccountId, nfeEmailAccounts.id))
     .where(eq(nfePendentes.status, "pendente"))
     .orderBy(desc(nfePendentes.recebidaEm));
 }
+
+export type NfePendenteComConta = Awaited<ReturnType<typeof listNfePendentes>>[number];
 
 /**
  * Dispara a varredura manual das caixas conectadas — usado pelo botão

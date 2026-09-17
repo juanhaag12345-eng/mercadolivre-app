@@ -1,0 +1,1 @@
+ALTER TABLE "nfe_pendentes" ADD COLUMN "xml_conteudo" text;

@@ -2,21 +2,21 @@
 
 import { useActionState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
-import { AlertTriangle, CheckCheck, Loader2, X } from "lucide-react";
+import { AlertTriangle, CheckCheck, Download, Loader2, Mail, X } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input, Label, Select } from "@/components/ui/Field";
-import { approveNfePendente, rejectNfePendente } from "@/actions/nfe";
+import { approveNfePendente, rejectNfePendente, type NfePendenteComConta } from "@/actions/nfe";
 import type { StockItemRow } from "@/actions/stock";
 import { formatCurrency, formatDate } from "@/lib/format";
-import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type NfeItemParsed, type NfePendente } from "@/db/schema";
+import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type NfeItemParsed } from "@/db/schema";
 import type { ActionResult } from "@/actions/products";
 
 export function NfePendenteCard({
   nota,
   stockItems,
 }: {
-  nota: NfePendente;
+  nota: NfePendenteComConta;
   stockItems: StockItemRow[];
 }) {
   const approveAction = approveNfePendente.bind(null, nota.id);
@@ -37,6 +37,7 @@ export function NfePendenteCard({
             <p className="text-xs text-muted mt-0.5">{nota.erro}</p>
           </div>
         </div>
+        <ContaEBaixarXml contaEmail={nota.contaEmail} temXml={nota.temXml} nfePendenteId={nota.id} />
         <Button
           type="button"
           variant="ghost"
@@ -64,6 +65,7 @@ export function NfePendenteCard({
           {nota.fornecedorCnpj && (
             <p className="text-xs text-muted mt-0.5">CNPJ: {nota.fornecedorCnpj}</p>
           )}
+          <ContaEBaixarXml contaEmail={nota.contaEmail} temXml={nota.temXml} nfePendenteId={nota.id} />
         </div>
         <span className="shrink-0 rounded-full bg-accent-soft px-2.5 py-0.5 text-xs font-semibold text-accent whitespace-nowrap">
           {formatCurrency(valorTotal)}
@@ -157,5 +159,36 @@ function ApproveButton() {
       {pending ? <Loader2 size={16} className="animate-spin" /> : <CheckCheck size={16} />}
       Aprovar e dar entrada no estoque
     </Button>
+  );
+}
+
+// Mostra em qual caixa de e-mail essa nota chegou (importante com mais de
+// uma conta conectada) e, se o XML original ainda está guardado, um link
+// pra baixar o arquivo da NF-e direto do navegador.
+function ContaEBaixarXml({
+  contaEmail,
+  temXml,
+  nfePendenteId,
+}: {
+  contaEmail: string;
+  temXml: boolean;
+  nfePendenteId: string;
+}) {
+  return (
+    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted mt-1">
+      <span className="inline-flex items-center gap-1">
+        <Mail size={12} />
+        {contaEmail}
+      </span>
+      {temXml && (
+        <a
+          href={`/api/email-nfe/nota/${nfePendenteId}/xml`}
+          className="inline-flex items-center gap-1 text-brand hover:underline"
+        >
+          <Download size={12} />
+          Baixar XML
+        </a>
+      )}
+    </p>
   );
 }

@@ -412,13 +412,17 @@ async function scanAccountForNfe(
     if (xmlParts.length === 0) continue;
 
     for (const part of xmlParts) {
+      // Guardado fora do try pra ficar acessível no catch também — mesmo
+      // quando o XML não é uma NF-e válida, a gente ainda quer guardar o
+      // conteúdo original pra dar pra baixar/conferir manualmente na tela.
+      let xml: string | null = null;
       try {
         const base64 = await fetchAttachmentBase64(
           accessToken,
           messageId,
           part.body!.attachmentId!
         );
-        const xml = Buffer.from(base64, "base64").toString("utf-8");
+        xml = Buffer.from(base64, "base64").toString("utf-8");
         const parsedNfe = parseNfeXml(xml);
 
         await db.insert(nfePendentes).values({
@@ -432,6 +436,7 @@ async function scanAccountForNfe(
           valorTotal: String(parsedNfe.valorTotal),
           formaPagamentoSugerida: parsedNfe.formaPagamentoSugerida,
           itens: parsedNfe.itens,
+          xmlConteudo: xml,
         });
         novas += 1;
         // Um e-mail pode trazer mais de uma NF-e anexada (raro, mas
@@ -452,6 +457,7 @@ async function scanAccountForNfe(
             fornecedorNome: "Não identificado",
             valorTotal: "0",
             itens: [],
+            xmlConteudo: xml,
             erro: mensagem,
           })
           .onConflictDoNothing();
