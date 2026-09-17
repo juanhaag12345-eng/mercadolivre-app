@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DISPATCHERS, ORDER_STATUSES, SALE_FEE_TYPES } from "@/db/schema";
+import { DISPATCHERS, ORDER_STATUSES, PAYMENT_METHODS, SALE_FEE_TYPES } from "@/db/schema";
 
 export const productSchema = z.object({
   name: z.string().trim().min(2, "Informe o nome do produto"),
@@ -53,6 +53,26 @@ export const confirmPendingSaleSchema = z.object({
   saleDate: z.string().min(1, "Informe a data"),
   dispatchedBy: z.enum(DISPATCHERS, { message: "Selecione quem despachou" }),
   productCostManual: z.coerce.number().min(0, "Informe o custo do produto (pode ser 0)"),
+  // Item de estoque a que essa venda se refere — usado pra dar baixa no
+  // estoque (ver actions/stock.ts). Obrigatório: sem isso o controle de
+  // estoque não sabe o que descontar.
+  stockItemId: z.string().uuid("Selecione o produto para dar baixa no estoque"),
+});
+
+// Cadastro/edição de um item de estoque (aba Compras).
+export const stockItemSchema = z.object({
+  name: z.string().trim().min(2, "Informe o nome do item"),
+  minStock: z.coerce.number().int().min(0, "Não pode ser negativo"),
+});
+
+// Registro de uma compra de mercadoria (aba Compras) — sempre por unidade.
+export const stockPurchaseSchema = z.object({
+  stockItemId: z.string().uuid("Selecione o item comprado"),
+  purchaseDate: z.string().min(1, "Informe a data da compra"),
+  supplier: z.string().trim().min(1, "Informe o fornecedor"),
+  unitCost: z.coerce.number().min(0, "Não pode ser negativo"),
+  quantity: z.coerce.number().int().min(1, "Mínimo 1"),
+  paymentMethod: z.enum(PAYMENT_METHODS, { message: "Selecione a forma de pagamento" }),
 });
 
 // Campos comuns a qualquer edição de venda já registrada (tela de detalhe

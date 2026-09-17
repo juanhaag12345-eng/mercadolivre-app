@@ -37,6 +37,27 @@ export const DISPATCHER_LABELS: Record<Dispatcher, string> = {
 export const SALE_SOURCES = ["manual", "mercadolivre"] as const;
 export type SaleSource = (typeof SALE_SOURCES)[number];
 
+// Forma de pagamento de uma compra de mercadoria (aba Compras/estoque)
+export const PAYMENT_METHODS = [
+  "pix",
+  "cartao_credito",
+  "cartao_debito",
+  "dinheiro",
+  "boleto",
+  "transferencia",
+  "outro",
+] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  pix: "Pix",
+  cartao_credito: "Cartão de crédito",
+  cartao_debito: "Cartão de débito",
+  dinheiro: "Dinheiro",
+  boleto: "Boleto",
+  transferencia: "Transferência",
+  outro: "Outro",
+};
+
 export const products = pgTable(
   "products",
   {
@@ -91,6 +112,65 @@ export const products = pgTable(
       .defaultNow(),
   },
   (table) => [index("products_name_idx").on(table.name)]
+);
+
+// --- Estoque / Compras de mercadoria ---
+//
+// Item controlado por estoque — não é o mesmo cadastro da tabela `products`
+// (que é o catálogo de vendas manuais/anúncios): esse aqui existe só para
+// ligar compras de mercadoria a vendas do Mercado Livre (em /pendentes), já
+// que uma venda do Mercado Livre não tem um "produto cadastrado" por trás
+// (ver comentário em `sales.productNameSnapshot`). Cadastrado na aba
+// Compras.
+export const stockItems = pgTable(
+  "stock_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // Código interno sequencial (1, 2, 3...) — mesmo esquema do
+    // `products.internalCode`, mas numa sequência própria e independente.
+    internalCode: serial("internal_code").notNull().unique(),
+    name: text("name").notNull(),
+    // Estoque mínimo: quando o estoque atual (compras - vendas ligadas a
+    // esse item) cai para esse nível ou menos, o item aparece como alerta
+    // de reposição no dashboard e destacado na aba Compras.
+    minStock: integer("min_stock").notNull().default(0),
+    // Permite "aposentar" um item (ex: parou de vender) sem apagar o
+    // histórico de compras/vendas já ligado a ele — itens inativos somem da
+    // lista de seleção em /pendentes.
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("stock_items_name_idx").on(table.name)]
+);
+
+// Uma compra de mercadoria = entrada de estoque de um item, sempre
+// registrada por unidade (preço pago e quantidade comprada).
+export const stockPurchases = pgTable(
+  "stock_purchases",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // onDelete "restrict": não deixa apagar um item de estoque que já tem
+    // compra registrada (evita perder histórico) — use o campo `active`
+    // acima pra aposentar o item em vez de excluir.
+    stockItemId: uuid("stock_item_id")
+      .notNull()
+      .references(() => stockItems.id, { onDelete: "restrict" }),
+    purchaseDate: date("purchase_date").notNull(),
+    supplier: text("supplier").notNull(),
+    // Preço de custo pago, sempre por unidade.
+    unitCost: numeric("unit_cost", { precision: 12, scale: 2 }).notNull(),
+    quantity: integer("quantity").notNull(),
+    paymentMethod: text("payment_method", { enum: PAYMENT_METHODS }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("stock_purchases_item_idx").on(table.stockItemId)]
 );
 
 export const sales = pgTable(
@@ -216,6 +296,13 @@ export const sales = pgTable(
     // dinheiro (ver /liberacoes). Null em vendas manuais e em vendas do
     // Mercado Livre confirmadas antes dessa coluna existir.
     mlSellerId: text("ml_seller_id"),
+    // Item de estoque escolhido em /pendentes na hora de confirmar a
+    // entrada — usado para dar baixa no estoque (ver actions/stock.ts).
+    // Null em vendas manuais e em vendas do Mercado Livre confirmadas antes
+    // dessa coluna existir.
+    stockItemId: uuid("stock_item_id").references(() => stockItems.id, {
+      onDelete: "set null",
+    }),
     // --- Liberação do dinheiro na conta do Mercado Livre (ver /liberacoes) ---
     // Preenchidos consultando a API de billing do Mercado Livre com o mesmo
     // access_token da venda — não é um valor calculado localmente. Ficam
@@ -239,6 +326,7 @@ export const sales = pgTable(
     index("sales_sale_date_idx").on(table.saleDate),
     index("sales_order_status_idx").on(table.orderStatus),
     index("sales_money_release_status_idx").on(table.moneyReleaseStatus),
+    index("sales_stock_item_id_idx").on(table.stockItemId),
   ]
 );
 

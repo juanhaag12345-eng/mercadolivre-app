@@ -114,6 +114,7 @@ function parseConfirmForm(formData: FormData) {
     saleDate: String(formData.get("saleDate") ?? ""),
     dispatchedBy: String(formData.get("dispatchedBy") ?? ""),
     productCostManual: String(formData.get("productCostManual") ?? "0"),
+    stockItemId: String(formData.get("stockItemId") ?? ""),
   };
 }
 
@@ -163,6 +164,7 @@ export async function confirmPendingSale(
       mlSellerId: pending.mlSellerId,
       mlPaymentId: extractFirstPaymentId(pending.rawOrderPayload),
       mlPackId: pending.mlPackId,
+      stockItemId: values.stockItemId,
       buyerNickname: pending.buyerNickname,
       buyerFullName: pending.buyerFullName,
       quantity: values.quantity,
@@ -211,6 +213,7 @@ export async function confirmPendingSale(
   revalidatePath("/");
   revalidatePath("/produtos");
   revalidatePath("/custo-fornecimento");
+  revalidatePath("/compras");
   return { ok: true };
 }
 

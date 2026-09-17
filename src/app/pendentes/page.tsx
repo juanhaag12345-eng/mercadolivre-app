@@ -1,7 +1,9 @@
+import Link from "next/link";
 import { AlertTriangle, CheckCircle2, Inbox, Plug, Plus, Unplug } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { LinkButton } from "@/components/ui/Button";
 import { listConnections, listPendingSales } from "@/actions/mercadolivre";
+import { listStockItemsWithStock } from "@/actions/stock";
 import { PendingSaleCard } from "@/components/pendentes/PendingSaleCard";
 import { SyncRecentOrdersButton } from "@/components/pendentes/SyncRecentOrdersButton";
 import { RemoveMlAccountButton } from "@/components/pendentes/RemoveMlAccountButton";
@@ -19,9 +21,10 @@ export default async function PendentesPage(props: PageProps<"/pendentes">) {
   const conectado = searchParams.ml_conectado === "1";
   const erro = typeof searchParams.ml_erro === "string" ? searchParams.ml_erro : undefined;
 
-  const [connections, pendingSales] = await Promise.all([
+  const [connections, pendingSales, stockItems] = await Promise.all([
     listConnections(),
     listPendingSales(),
+    listStockItemsWithStock({ onlyActive: true }),
   ]);
 
   return (
@@ -105,6 +108,19 @@ export default async function PendentesPage(props: PageProps<"/pendentes">) {
         )}
       </div>
 
+      {stockItems.length === 0 && pendingSales.length > 0 && (
+        <div className="mb-6 flex items-center gap-2 rounded-xl bg-warning-soft px-4 py-3 text-sm text-warning">
+          <AlertTriangle size={16} />
+          <span>
+            Nenhum item de estoque cadastrado ainda — cadastre pelo menos um em{" "}
+            <Link href="/compras" className="font-semibold underline">
+              Compras
+            </Link>{" "}
+            antes de confirmar uma venda, pra poder dar baixa no estoque certo.
+          </span>
+        </div>
+      )}
+
       {pendingSales.length === 0 ? (
         <Card className="flex flex-col items-center justify-center gap-2 py-12 text-center">
           <span className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-muted text-muted">
@@ -119,7 +135,7 @@ export default async function PendentesPage(props: PageProps<"/pendentes">) {
       ) : (
         <div className="space-y-3">
           {pendingSales.map((pending) => (
-            <PendingSaleCard key={pending.id} pending={pending} />
+            <PendingSaleCard key={pending.id} pending={pending} stockItems={stockItems} />
           ))}
         </div>
       )}

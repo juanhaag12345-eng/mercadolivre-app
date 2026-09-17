@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { ArrowRight, Clock, CreditCard, DollarSign, Percent, Receipt, ShoppingBag, Truck, Wallet } from "lucide-react";
+import { AlertTriangle, ArrowRight, Clock, CreditCard, DollarSign, Percent, Receipt, ShoppingBag, Truck, Wallet } from "lucide-react";
 import { getSalesForRange } from "@/actions/sales";
 import { getMonthlyGoal } from "@/actions/goals";
 import { getSettings } from "@/actions/settings";
 import { listProducts } from "@/actions/products";
 import { getPendingReleaseSummary } from "@/actions/liberacoes";
+import { getStockAlerts } from "@/actions/stock";
 import { DashboardFilterBar } from "@/components/dashboard/DashboardFilterBar";
 import { FeeCard } from "@/components/dashboard/FeeCard";
 import { GoalCard } from "@/components/dashboard/GoalCard";
@@ -42,7 +43,7 @@ export default async function DashboardPage(props: PageProps<"/">) {
 
   const prevPeriod = from && to ? previousPeriod(from, to) : null;
 
-  const [goal, products, currentSales, goalMonthSales, partnerSettings, previousSales, pendingRelease] =
+  const [goal, products, currentSales, goalMonthSales, partnerSettings, previousSales, pendingRelease, stockAlerts] =
     await Promise.all([
       getMonthlyGoal(yearMonth),
       listProducts(),
@@ -51,6 +52,7 @@ export default async function DashboardPage(props: PageProps<"/">) {
       getSettings(),
       prevPeriod ? getSalesForRange(prevPeriod.from, prevPeriod.to, productId) : Promise.resolve([]),
       getPendingReleaseSummary(),
+      getStockAlerts(),
     ]);
 
   const totals = currentSales.reduce(
@@ -226,6 +228,14 @@ export default async function DashboardPage(props: PageProps<"/">) {
           icon={Wallet}
           tone={pendingRelease.count > 0 ? "success" : "neutral"}
         />
+        <Link href="/compras" className="block">
+          <StatCard
+            label="Itens com estoque baixo"
+            value={String(stockAlerts.length)}
+            icon={AlertTriangle}
+            tone={stockAlerts.length > 0 ? "danger" : "neutral"}
+          />
+        </Link>
         <div className="md:col-span-2">
           <FeeCard
             label="Taxa de envio"

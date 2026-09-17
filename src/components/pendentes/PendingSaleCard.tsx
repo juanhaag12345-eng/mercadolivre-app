@@ -1,12 +1,13 @@
 "use client";
 
-import { useActionState, useState, useTransition } from "react";
+import { useActionState, useMemo, useState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
-import { CheckCheck, Loader2, X } from "lucide-react";
+import { CheckCheck, Loader2, PackageSearch, X } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { IntegerInput, Label, MoneyInput, Select } from "@/components/ui/Field";
 import { confirmPendingSale, ignorePendingSale } from "@/actions/mercadolivre";
+import type { StockItemRow } from "@/actions/stock";
 import { formatCurrency, formatDate, formatPercent, formatTime } from "@/lib/format";
 import { DISPATCHER_LABELS, DISPATCHERS, type PendingSale } from "@/db/schema";
 import type { ActionResult } from "@/actions/products";
@@ -15,14 +16,26 @@ function toDateInputValue(date: Date): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(date);
 }
 
-export function PendingSaleCard({ pending }: { pending: PendingSale }) {
+export function PendingSaleCard({
+  pending,
+  stockItems,
+}: {
+  pending: PendingSale;
+  stockItems: StockItemRow[];
+}) {
   const confirmAction = confirmPendingSale.bind(null, pending.id);
   const [state, formAction] = useActionState<ActionResult | null, FormData>(confirmAction, null);
   const errors = state && !state.ok ? state.errors : {};
 
   const [quantity, setQuantity] = useState(pending.quantity);
   const [productCost, setProductCost] = useState(0);
+  const [stockItemId, setStockItemId] = useState("");
   const [ignoring, startIgnoreTransition] = useTransition();
+
+  const selectedStockItem = useMemo(
+    () => stockItems.find((item) => item.id === stockItemId) ?? null,
+    [stockItems, stockItemId]
+  );
 
   const orderDateObj = new Date(pending.orderDate);
   const unitPrice = Number(pending.unitPriceSnapshot);
@@ -94,6 +107,39 @@ export function PendingSaleCard({ pending }: { pending: PendingSale }) {
               ))}
             </Select>
           </div>
+        </div>
+
+        <div>
+          <div className="flex items-baseline justify-between mb-1.5">
+            <Label>Produto (estoque)</Label>
+            {selectedStockItem && (
+              <span
+                className={`flex items-center gap-1 text-xs font-medium ${
+                  selectedStockItem.lowStock ? "text-danger" : "text-muted"
+                }`}
+              >
+                <PackageSearch size={12} />
+                estoque: {selectedStockItem.currentStock} un.
+                {selectedStockItem.lowStock && " (baixo)"}
+              </span>
+            )}
+          </div>
+          <Select
+            name="stockItemId"
+            value={stockItemId}
+            onChange={(e) => setStockItemId(e.target.value)}
+            error={errors.stockItemId}
+            required
+          >
+            <option value="" disabled>
+              Selecione o produto...
+            </option>
+            {stockItems.map((item) => (
+              <option key={item.id} value={item.id}>
+                #{item.internalCode} {item.name}
+              </option>
+            ))}
+          </Select>
         </div>
 
         <div>
