@@ -5,7 +5,7 @@ import { useFormStatus } from "react-dom";
 import { CheckCircle2, Loader2, ShoppingCart } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { Input, IntegerInput, Label, MoneyInput, Select } from "@/components/ui/Field";
+import { Input, IntegerInput, Label, MoneyInput, Select, Textarea } from "@/components/ui/Field";
 import { createPurchase } from "@/actions/stock";
 import { todayISO } from "@/lib/format";
 import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentMethod } from "@/db/schema";
@@ -21,6 +21,8 @@ export function PurchaseForm({ stockItems }: { stockItems: StockItemRow[] }) {
   const [unitCost, setUnitCost] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | "">("");
+  const [paymentTermDays, setPaymentTermDays] = useState(0);
+  const [observacao, setObservacao] = useState("");
   const [showSuccess, setShowSuccess] = useState(false);
 
   // Reseta o formulário quando o registro der certo — comparar com o
@@ -36,6 +38,8 @@ export function PurchaseForm({ stockItems }: { stockItems: StockItemRow[] }) {
       setUnitCost(0);
       setQuantity(1);
       setPaymentMethod("");
+      setPaymentTermDays(0);
+      setObservacao("");
       setShowSuccess(true);
     }
   }
@@ -56,10 +60,14 @@ export function PurchaseForm({ stockItems }: { stockItems: StockItemRow[] }) {
 
   return (
     <Card>
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex items-center gap-2 mb-1">
         <ShoppingCart size={16} className="text-muted" />
-        <h2 className="font-semibold">Registrar compra</h2>
+        <h2 className="font-semibold">Nova compra sem NF</h2>
       </div>
+      <p className="text-xs text-muted mb-4">
+        Para compras com nota fiscal, aprove a NF-e recebida por e-mail em Notas Fiscais — ela entra
+        automaticamente aqui no histórico, marcada como &ldquo;Com NF&rdquo;.
+      </p>
 
       {showSuccess && (
         <div className="mb-4 flex items-center gap-2 rounded-xl bg-success-soft px-4 py-3 text-sm text-success">
@@ -111,24 +119,47 @@ export function PurchaseForm({ stockItems }: { stockItems: StockItemRow[] }) {
           </div>
         </div>
 
-        <div>
-          <Label>Forma de pagamento</Label>
-          <Select
-            name="paymentMethod"
-            value={paymentMethod}
-            onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
-            error={errors.paymentMethod}
-            required
-          >
-            <option value="" disabled>
-              Selecione...
-            </option>
-            {PAYMENT_METHODS.map((method) => (
-              <option key={method} value={method}>
-                {PAYMENT_METHOD_LABELS[method]}
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <Label>Forma de pagamento</Label>
+            <Select
+              name="paymentMethod"
+              value={paymentMethod}
+              onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
+              error={errors.paymentMethod}
+              required
+            >
+              <option value="" disabled>
+                Selecione...
               </option>
-            ))}
-          </Select>
+              {PAYMENT_METHODS.map((method) => (
+                <option key={method} value={method}>
+                  {PAYMENT_METHOD_LABELS[method]}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Label hint="0 = à vista">Prazo de pagamento (dias)</Label>
+            <IntegerInput
+              name="paymentTermDays"
+              min={0}
+              value={paymentTermDays}
+              onValueChange={setPaymentTermDays}
+              error={errors.paymentTermDays}
+            />
+          </div>
+        </div>
+
+        <div>
+          <Label hint="opcional">Observação</Label>
+          <Textarea
+            name="observacao"
+            rows={2}
+            value={observacao}
+            onChange={(e) => setObservacao(e.target.value)}
+            error={errors.observacao}
+          />
         </div>
 
         {errors.form && <p className="text-sm text-danger">{errors.form}</p>}

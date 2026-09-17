@@ -3,9 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { nfeEmailAccounts, nfePendentes, stockPurchases, type NfeItemParsed } from "@/db/schema";
+import { nfeEmailAccounts, nfePendentes, stockItems, stockPurchases, type NfeItemParsed } from "@/db/schema";
 import { approveNfeSchema } from "@/lib/validations";
 import { scanAllAccountsForNfe } from "@/lib/gmail-nfe";
+import { addDays } from "@/lib/dates";
+import { NOVO_PRODUTO_SENTINEL } from "@/lib/stock-matching";
 import type { ActionResult } from "@/actions/products";
 
 export async function listEmailAccounts() {
@@ -79,6 +81,8 @@ export async function scanNowAction(): Promise<{ ok: boolean; message: string }>
 function parseItemMappings(formData: FormData, itens: NfeItemParsed[]) {
   return itens.map((item, index) => ({
     item,
+    // Pode ser um uuid de item existente, o sentinela "criar produto novo"
+    // (ver lib/stock-matching), ou vazio ("Ignorar esse item").
     stockItemId: String(formData.get(`item_${index}_stockItemId`) ?? "").trim() || null,
   }));
 }
@@ -86,10 +90,14 @@ function parseItemMappings(formData: FormData, itens: NfeItemParsed[]) {
 /**
  * Aprova uma NF-e pendente: para cada item da nota ligado a um item de
  * estoque no formulário, cria uma compra de estoque de verdade
- * (stock_purchases) com a data e forma de pagamento informadas; itens
- * deixados em branco são ignorados (não geram compra nenhuma). Só depois
- * disso a nota muda de status pra "aprovada" — nunca mexe em estoque real
- * antes da conferência manual.
+ * (stock_purchases) com a data, forma de pagamento e prazo informados —
+ * marcando a origem como "nf" e guardando o número da nota, pra distinguir
+ * de compras sem NF no histórico. Itens deixados em branco são ignorados
+ * (não geram compra nenhuma). Quando o item não corresponde a nenhum
+ * produto já cadastrado (sentinela "criar novo"), cria o item de estoque
+ * na hora, marcado como "PRODUTO NOVO" pra revisão depois. Só depois de
+ * tudo isso a nota muda de status pra "aprovada" — nunca mexe em estoque
+ * real antes da conferência manual.
  */
 export async function approveNfePendente(
   nfePendenteId: string,
@@ -99,6 +107,7 @@ export async function approveNfePendente(
   const parsed = approveNfeSchema.safeParse({
     purchaseDate: String(formData.get("purchaseDate") ?? ""),
     paymentMethod: String(formData.get("paymentMethod") ?? ""),
+    paymentTermDays: Number(formData.get("paymentTermDays") ?? 0),
   });
   if (!parsed.success) {
     const errors: Record<string, string> = {};
@@ -129,17 +138,41 @@ export async function approveNfePendente(
     };
   }
 
-  const { purchaseDate, paymentMethod } = parsed.data;
+  const { purchaseDate, paymentMethod, paymentTermDays } = parsed.data;
+  const dueDate = addDays(purchaseDate, paymentTermDays);
 
   await db.transaction(async (tx) => {
     for (const { item, stockItemId } of selecionados) {
+      let resolvedStockItemId = stockItemId!;
+      let produtoNovo = false;
+
+      if (stockItemId === NOVO_PRODUTO_SENTINEL) {
+        const [created] = await tx
+          .insert(stockItems)
+          .values({
+            name: item.descricao,
+            ean: item.ean,
+            minStock: 0,
+            criadoAutomaticamente: true,
+          })
+          .returning({ id: stockItems.id });
+        resolvedStockItemId = created.id;
+        produtoNovo = true;
+      }
+
       await tx.insert(stockPurchases).values({
-        stockItemId: stockItemId!,
+        stockItemId: resolvedStockItemId,
         purchaseDate,
         supplier: nota.fornecedorNome,
         unitCost: String(item.valorUnitario),
         quantity: Math.max(1, Math.round(item.quantidade)),
         paymentMethod,
+        origem: "nf",
+        notaFiscalNumero: nota.numeroNota,
+        nfePendenteId: nota.id,
+        produtoNovo,
+        paymentTermDays,
+        dueDate,
       });
     }
     await tx

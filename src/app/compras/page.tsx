@@ -1,14 +1,26 @@
 import { AlertTriangle } from "lucide-react";
 import { Card } from "@/components/ui/Card";
-import { listStockItemsWithStock, listPurchases } from "@/actions/stock";
+import { getStockAnalytics, listStockItemsWithStock, listPurchases, type PurchaseFilter } from "@/actions/stock";
 import { StockItemsList } from "@/components/compras/StockItemsList";
 import { PurchaseForm } from "@/components/compras/PurchaseForm";
 import { PurchaseHistory } from "@/components/compras/PurchaseHistory";
 
 export const dynamic = "force-dynamic";
 
-export default async function ComprasPage() {
-  const [items, purchases] = await Promise.all([listStockItemsWithStock(), listPurchases()]);
+const VALID_FILTERS: PurchaseFilter[] = ["todas", "nf", "sem_nf", "pendente", "pago"];
+
+export default async function ComprasPage(props: PageProps<"/compras">) {
+  const searchParams = await props.searchParams;
+  const filtroParam = typeof searchParams.filtro === "string" ? searchParams.filtro : "todas";
+  const filtro: PurchaseFilter = VALID_FILTERS.includes(filtroParam as PurchaseFilter)
+    ? (filtroParam as PurchaseFilter)
+    : "todas";
+
+  const [items, purchases, analytics] = await Promise.all([
+    listStockItemsWithStock(),
+    listPurchases({ filtro }),
+    getStockAnalytics(),
+  ]);
 
   const lowStockItems = items.filter((item) => item.active && item.lowStock);
 
@@ -17,7 +29,8 @@ export default async function ComprasPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold">Compras e estoque</h1>
         <p className="text-sm text-muted mt-0.5">
-          Registre as compras de mercadoria para controlar o estoque — ligado às vendas confirmadas em Pendentes.
+          Cadastro de produtos, controle de estoque e registro de compras (com ou sem nota fiscal) — ligado às
+          vendas confirmadas em Pendentes.
         </p>
       </div>
 
@@ -41,10 +54,10 @@ export default async function ComprasPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <PurchaseForm stockItems={items.filter((i) => i.active)} />
-        <PurchaseHistory purchases={purchases} />
+        <PurchaseHistory purchases={purchases} filtro={filtro} />
       </div>
 
-      <StockItemsList items={items} />
+      <StockItemsList items={items} analytics={analytics} />
     </div>
   );
 }

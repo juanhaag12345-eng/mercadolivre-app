@@ -13,6 +13,7 @@ export function NewStockItemForm() {
   const [state, formAction] = useActionState<ActionResult | null, FormData>(createStockItem, null);
   const errors = state && !state.ok ? state.errors : {};
   const [name, setName] = useState("");
+  const [ean, setEan] = useState("");
   const [minStock, setMinStock] = useState(0);
   const [formKey, setFormKey] = useState(0);
 
@@ -23,6 +24,7 @@ export function NewStockItemForm() {
     setHandledState(state);
     if (state?.ok) {
       setName("");
+      setEan("");
       setMinStock(0);
       setOpen(false);
       setFormKey((k) => k + 1);
@@ -43,6 +45,10 @@ export function NewStockItemForm() {
       <div className="min-w-[180px] flex-1">
         <Label>Nome do item</Label>
         <Input name="name" value={name} onChange={(e) => setName(e.target.value)} error={errors.name} autoFocus />
+      </div>
+      <div className="w-36">
+        <Label hint="opcional">EAN</Label>
+        <Input name="ean" value={ean} onChange={(e) => setEan(e.target.value)} error={errors.ean} />
       </div>
       <div className="w-32">
         <Label hint="alerta abaixo disso">Estoque mín.</Label>

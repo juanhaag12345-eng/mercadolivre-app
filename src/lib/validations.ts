@@ -62,19 +62,24 @@ export const confirmPendingSaleSchema = z.object({
 // Cadastro/edição de um item de estoque (aba Compras).
 export const stockItemSchema = z.object({
   name: z.string().trim().min(2, "Informe o nome do item"),
+  ean: z.string().trim().optional().or(z.literal("")),
   minStock: z.coerce.number().int().min(0, "Não pode ser negativo"),
 });
 
-// Aprovação de uma NF-e recebida por e-mail (aba Notas Fiscais): a data e a
-// forma de pagamento valem pra nota inteira; qual item de estoque cada
-// linha do XML vira (ou se é ignorada) é lido à parte do FormData, já que a
-// quantidade de itens varia por nota.
+// Aprovação de uma NF-e recebida por e-mail (aba Notas Fiscais): a data, a
+// forma de pagamento e o prazo valem pra nota inteira; qual item de
+// estoque cada linha do XML vira (ou se é ignorada, ou se é um produto
+// novo a criar) é lido à parte do FormData, já que a quantidade de itens
+// varia por nota.
 export const approveNfeSchema = z.object({
   purchaseDate: z.string().min(1, "Informe a data da compra"),
   paymentMethod: z.enum(PAYMENT_METHODS, { message: "Selecione a forma de pagamento" }),
+  paymentTermDays: z.coerce.number().int().min(0, "Não pode ser negativo").max(3650).default(0),
 });
 
 // Registro de uma compra de mercadoria (aba Compras) — sempre por unidade.
+// Toda compra feita por esse formulário é "sem NF" (a única forma de
+// registrar uma compra "com NF" é aprovando a nota em /notas-fiscais).
 export const stockPurchaseSchema = z.object({
   stockItemId: z.string().uuid("Selecione o item comprado"),
   purchaseDate: z.string().min(1, "Informe a data da compra"),
@@ -82,6 +87,8 @@ export const stockPurchaseSchema = z.object({
   unitCost: z.coerce.number().min(0, "Não pode ser negativo"),
   quantity: z.coerce.number().int().min(1, "Mínimo 1"),
   paymentMethod: z.enum(PAYMENT_METHODS, { message: "Selecione a forma de pagamento" }),
+  paymentTermDays: z.coerce.number().int().min(0, "Não pode ser negativo").max(3650).default(0),
+  observacao: z.string().trim().optional().or(z.literal("")),
 });
 
 // Campos comuns a qualquer edição de venda já registrada (tela de detalhe

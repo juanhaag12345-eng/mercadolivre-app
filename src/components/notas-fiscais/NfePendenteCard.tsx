@@ -1,15 +1,16 @@
 "use client";
 
-import { useActionState, useTransition } from "react";
+import { useActionState, useState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
-import { AlertTriangle, CheckCheck, Download, Loader2, Mail, X } from "lucide-react";
-import { Card } from "@/components/ui/Card";
+import { AlertTriangle, CheckCheck, Download, Loader2, Mail, Sparkles, X } from "lucide-react";
+import { Card, Badge } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { Input, Label, Select } from "@/components/ui/Field";
+import { Input, IntegerInput, Label, Select } from "@/components/ui/Field";
 import { approveNfePendente, rejectNfePendente, type NfePendenteComConta } from "@/actions/nfe";
 import type { StockItemRow } from "@/actions/stock";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type NfeItemParsed } from "@/db/schema";
+import { matchStockItem, NOVO_PRODUTO_SENTINEL } from "@/lib/stock-matching";
 import type { ActionResult } from "@/actions/products";
 
 export function NfePendenteCard({
@@ -23,9 +24,15 @@ export function NfePendenteCard({
   const [state, formAction] = useActionState<ActionResult | null, FormData>(approveAction, null);
   const errors = state && !state.ok ? state.errors : {};
   const [rejecting, startRejectTransition] = useTransition();
+  const [paymentTermDays, setPaymentTermDays] = useState(0);
 
   const itens = (nota.itens as NfeItemParsed[]) ?? [];
   const valorTotal = Number(nota.valorTotal);
+
+  // Correspondência automática por EAN (prioridade) ou nome idêntico — só
+  // quando há certeza; sem isso, o item vem pré-marcado como "produto
+  // novo" (o usuário ainda pode trocar manualmente antes de aprovar).
+  const suggestedMatches = itens.map((item) => matchStockItem(item, stockItems));
 
   if (nota.erro) {
     return (
@@ -78,26 +85,38 @@ export function NfePendenteCard({
             Itens da nota
           </Label>
           <div className="space-y-2">
-            {itens.map((item, index) => (
-              <div
-                key={index}
-                className="rounded-xl border border-border bg-surface-muted/40 p-2.5 space-y-1.5"
-              >
-                <p className="text-xs font-medium">{item.descricao}</p>
-                <p className="text-xs text-muted">
-                  {item.quantidade}x {formatCurrency(item.valorUnitario)} = {formatCurrency(item.valorTotal)}
-                  {item.ean ? ` · EAN ${item.ean}` : ""} · cód. fornecedor {item.codigoFornecedor}
-                </p>
-                <Select name={`item_${index}_stockItemId`} defaultValue="">
-                  <option value="">Ignorar esse item</option>
-                  {stockItems.map((stockItem) => (
-                    <option key={stockItem.id} value={stockItem.id}>
-                      #{stockItem.internalCode} {stockItem.name} (estoque atual: {stockItem.currentStock})
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            ))}
+            {itens.map((item, index) => {
+              const matchedId = suggestedMatches[index];
+              const defaultValue = matchedId ?? NOVO_PRODUTO_SENTINEL;
+              return (
+                <div
+                  key={index}
+                  className="rounded-xl border border-border bg-surface-muted/40 p-2.5 space-y-1.5"
+                >
+                  <p className="text-xs font-medium">{item.descricao}</p>
+                  <p className="text-xs text-muted">
+                    {item.quantidade}x {formatCurrency(item.valorUnitario)} = {formatCurrency(item.valorTotal)}
+                    {item.ean ? ` · EAN ${item.ean}` : ""} · cód. fornecedor {item.codigoFornecedor}
+                  </p>
+                  {!matchedId && (
+                    <p className="flex items-center gap-1 text-xs font-semibold text-accent">
+                      <Sparkles size={12} />
+                      Não encontramos esse produto no estoque — vai criar um novo (
+                      <Badge tone="accent">PRODUTO NOVO</Badge>) a não ser que você escolha outro abaixo.
+                    </p>
+                  )}
+                  <Select name={`item_${index}_stockItemId`} defaultValue={defaultValue}>
+                    <option value={NOVO_PRODUTO_SENTINEL}>➕ Criar produto novo com esse item</option>
+                    <option value="">Ignorar esse item</option>
+                    {stockItems.map((stockItem) => (
+                      <option key={stockItem.id} value={stockItem.id}>
+                        #{stockItem.internalCode} {stockItem.name} (estoque atual: {stockItem.currentStock})
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -129,6 +148,16 @@ export function NfePendenteCard({
                 </option>
               ))}
             </Select>
+          </div>
+          <div>
+            <Label hint="0 = à vista">Prazo de pagamento (dias)</Label>
+            <IntegerInput
+              name="paymentTermDays"
+              min={0}
+              value={paymentTermDays}
+              onValueChange={setPaymentTermDays}
+              error={errors.paymentTermDays}
+            />
           </div>
         </div>
 

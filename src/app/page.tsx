@@ -1,11 +1,25 @@
 import Link from "next/link";
-import { AlertTriangle, ArrowRight, Clock, CreditCard, DollarSign, Percent, Receipt, ShoppingBag, Truck, Wallet } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowRight,
+  CalendarClock,
+  Clock,
+  CreditCard,
+  DollarSign,
+  PackageX,
+  Percent,
+  Receipt,
+  ShoppingBag,
+  ShoppingCart,
+  Truck,
+  Wallet,
+} from "lucide-react";
 import { getSalesForRange } from "@/actions/sales";
 import { getMonthlyGoal } from "@/actions/goals";
 import { getSettings } from "@/actions/settings";
 import { listProducts } from "@/actions/products";
 import { getPendingReleaseSummary } from "@/actions/liberacoes";
-import { getStockAlerts } from "@/actions/stock";
+import { getOutOfStockItems, getStockAlerts, getUpcomingPayments, listPurchases } from "@/actions/stock";
 import { DashboardFilterBar } from "@/components/dashboard/DashboardFilterBar";
 import { FeeCard } from "@/components/dashboard/FeeCard";
 import { GoalCard } from "@/components/dashboard/GoalCard";
@@ -13,7 +27,7 @@ import { PartnerSplitCard } from "@/components/dashboard/PartnerSplitCard";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { RevenueChart, type DailyPoint } from "@/components/dashboard/RevenueChart";
 import { TopProducts, type TopProductRow } from "@/components/dashboard/TopProducts";
-import { Card } from "@/components/ui/Card";
+import { Card, Badge } from "@/components/ui/Card";
 import { LinkButton } from "@/components/ui/Button";
 import { formatCurrency, formatDate, formatPercent, currentYearMonth } from "@/lib/format";
 import { daysBetweenInclusive, isoRangeDays, isoRangeMonths, monthRange, percentChange, previousPeriod, previousYearMonth } from "@/lib/dates";
@@ -43,17 +57,31 @@ export default async function DashboardPage(props: PageProps<"/">) {
 
   const prevPeriod = from && to ? previousPeriod(from, to) : null;
 
-  const [goal, products, currentSales, goalMonthSales, partnerSettings, previousSales, pendingRelease, stockAlerts] =
-    await Promise.all([
-      getMonthlyGoal(yearMonth),
-      listProducts(),
-      getSalesForRange(from, to, productId),
-      getSalesForRange(goalFrom, goalTo),
-      getSettings(),
-      prevPeriod ? getSalesForRange(prevPeriod.from, prevPeriod.to, productId) : Promise.resolve([]),
-      getPendingReleaseSummary(),
-      getStockAlerts(),
-    ]);
+  const [
+    goal,
+    products,
+    currentSales,
+    goalMonthSales,
+    partnerSettings,
+    previousSales,
+    pendingRelease,
+    stockAlerts,
+    outOfStockItems,
+    upcomingPayments,
+    recentPurchases,
+  ] = await Promise.all([
+    getMonthlyGoal(yearMonth),
+    listProducts(),
+    getSalesForRange(from, to, productId),
+    getSalesForRange(goalFrom, goalTo),
+    getSettings(),
+    prevPeriod ? getSalesForRange(prevPeriod.from, prevPeriod.to, productId) : Promise.resolve([]),
+    getPendingReleaseSummary(),
+    getStockAlerts(),
+    getOutOfStockItems(),
+    getUpcomingPayments(6),
+    listPurchases({ limit: 5 }),
+  ]);
 
   const totals = currentSales.reduce(
     (acc, s) => {
@@ -294,6 +322,104 @@ export default async function DashboardPage(props: PageProps<"/">) {
                   <p className={`text-xs ${sale.profit >= 0 ? "text-success" : "text-danger"}`}>
                     lucro {formatCurrency(sale.profit)}
                   </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+        <Card>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <PackageX size={16} className="text-muted" />
+              <h2 className="font-semibold">Produtos sem estoque</h2>
+            </div>
+            <Link href="/compras" className="text-sm text-accent font-medium hover:underline">
+              Ver estoque
+            </Link>
+          </div>
+          {outOfStockItems.length === 0 ? (
+            <p className="text-sm text-muted py-6 text-center">Nenhum item zerado — tudo em estoque.</p>
+          ) : (
+            <div className="divide-y divide-border">
+              {outOfStockItems.map((item) => (
+                <div key={item.id} className="flex items-center justify-between py-2.5 text-sm">
+                  <p className="font-medium truncate">
+                    <span className="text-muted font-mono">#{item.internalCode}</span> {item.name}
+                  </p>
+                  <Badge tone="danger">{item.currentStock} un.</Badge>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        <Card>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <CalendarClock size={16} className="text-muted" />
+              <h2 className="font-semibold">Pagamentos próximos</h2>
+            </div>
+            <Link href="/compras?filtro=pendente" className="text-sm text-accent font-medium hover:underline">
+              Ver todos
+            </Link>
+          </div>
+          {upcomingPayments.length === 0 ? (
+            <p className="text-sm text-muted py-6 text-center">Nenhum pagamento pendente com prazo definido.</p>
+          ) : (
+            <div className="divide-y divide-border">
+              {upcomingPayments.map((payment) => (
+                <div key={payment.id} className="flex items-center justify-between py-2.5 text-sm">
+                  <div className="min-w-0">
+                    <p className="font-medium truncate">{payment.itemName}</p>
+                    <p className="text-xs text-muted">
+                      {payment.supplier} · vence {formatDate(payment.dueDate)}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0 ml-3">
+                    <p className="font-semibold">{formatCurrency(payment.totalCost)}</p>
+                    <Badge tone={payment.overdue ? "danger" : "warning"}>
+                      {payment.overdue ? "Atrasado" : `em ${payment.daysUntilDue}d`}
+                    </Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      <Card className="mt-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <ShoppingCart size={16} className="text-muted" />
+            <h2 className="font-semibold">Compras recentes</h2>
+          </div>
+          <Link href="/compras" className="text-sm text-accent font-medium hover:underline">
+            Ver todas
+          </Link>
+        </div>
+        {recentPurchases.length === 0 ? (
+          <p className="text-sm text-muted py-6 text-center">Nenhuma compra registrada ainda.</p>
+        ) : (
+          <div className="divide-y divide-border">
+            {recentPurchases.map((purchase) => (
+              <div key={purchase.id} className="flex items-center justify-between py-2.5 text-sm">
+                <div className="min-w-0">
+                  <p className="font-medium truncate">
+                    <span className="text-muted font-mono">#{purchase.itemInternalCode}</span> {purchase.itemName}
+                  </p>
+                  <p className="text-xs text-muted">
+                    {formatDate(purchase.purchaseDate)} · {purchase.supplier}
+                  </p>
+                </div>
+                <div className="text-right shrink-0 ml-3">
+                  <p className="font-semibold">{formatCurrency(purchase.totalCost)}</p>
+                  <Badge tone={purchase.origem === "nf" ? "accent" : "neutral"}>
+                    {purchase.origem === "nf" ? "Com NF" : "Sem NF"}
+                  </Badge>
                 </div>
               </div>
             ))}

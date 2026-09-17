@@ -58,6 +58,26 @@ export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   outro: "Outro",
 };
 
+// De onde veio uma compra de mercadoria: via nota fiscal recebida por
+// e-mail (aprovada em /notas-fiscais) ou cadastrada manualmente (aba
+// Compras) sem nota — permite comparar preço pago com e sem NF do mesmo
+// item.
+export const PURCHASE_ORIGINS = ["nf", "sem_nf"] as const;
+export type PurchaseOrigin = (typeof PURCHASE_ORIGINS)[number];
+export const PURCHASE_ORIGIN_LABELS: Record<PurchaseOrigin, string> = {
+  nf: "Com NF",
+  sem_nf: "Sem NF",
+};
+
+// Status de pagamento de uma compra — só o suficiente para saber o que
+// ainda precisa ser pago, sem virar um sistema financeiro completo.
+export const PAYMENT_STATUSES = ["pendente", "pago"] as const;
+export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
+export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
+  pendente: "Pendente",
+  pago: "Pago",
+};
+
 export const products = pgTable(
   "products",
   {
@@ -130,10 +150,18 @@ export const stockItems = pgTable(
     // `products.internalCode`, mas numa sequência própria e independente.
     internalCode: serial("internal_code").notNull().unique(),
     name: text("name").notNull(),
+    // Código de barras (EAN/GTIN) do produto, quando conhecido — usado para
+    // identificar automaticamente esse item nos itens de uma NF-e recebida
+    // por e-mail, sem depender do nome bater exatamente.
+    ean: text("ean"),
     // Estoque mínimo: quando o estoque atual (compras - vendas ligadas a
     // esse item) cai para esse nível ou menos, o item aparece como alerta
     // de reposição no dashboard e destacado na aba Compras.
     minStock: integer("min_stock").notNull().default(0),
+    // Marca um item criado automaticamente (sem intervenção manual) a
+    // partir de um item de NF-e não reconhecido — fica com essa marca até
+    // alguém revisar o cadastro e dispensar o aviso "PRODUTO NOVO".
+    criadoAutomaticamente: boolean("criado_automaticamente").notNull().default(false),
     // Permite "aposentar" um item (ex: parou de vender) sem apagar o
     // histórico de compras/vendas já ligado a ele — itens inativos somem da
     // lista de seleção em /pendentes.
@@ -166,11 +194,42 @@ export const stockPurchases = pgTable(
     unitCost: numeric("unit_cost", { precision: 12, scale: 2 }).notNull(),
     quantity: integer("quantity").notNull(),
     paymentMethod: text("payment_method", { enum: PAYMENT_METHODS }).notNull(),
+    // "nf" quando essa compra veio de uma NF-e aprovada em /notas-fiscais;
+    // "sem_nf" quando foi cadastrada manualmente aqui em Compras. Todo
+    // registro criado pelo formulário de Compras é sempre "sem_nf" — o
+    // fluxo de NF-e é o único que grava "nf".
+    origem: text("origem", { enum: PURCHASE_ORIGINS }).notNull().default("sem_nf"),
+    // Preenchidos só quando origem = "nf" — número da nota e referência de
+    // volta à pendência de NF-e que originou essa compra (pra permitir, no
+    // futuro, voltar no XML original a partir do histórico de compras).
+    notaFiscalNumero: text("nota_fiscal_numero"),
+    nfePendenteId: uuid("nfe_pendente_id").references(() => nfePendentes.id, {
+      onDelete: "set null",
+    }),
+    // Marca que essa compra foi a responsável por criar um item de estoque
+    // novo automaticamente (item de NF-e sem correspondência conhecida) —
+    // não muda com o tempo, é só um registro histórico de que aquele item
+    // surgiu sozinho, pra mostrar "PRODUTO NOVO" no histórico de compras.
+    produtoNovo: boolean("produto_novo").notNull().default(false),
+    // Prazo de pagamento em dias a partir da data da compra (0 = à vista).
+    // dueDate é calculado uma vez na hora do cadastro (purchaseDate +
+    // paymentTermDays) e guardado pronto — evita recalcular com fuso
+    // horário toda vez que a tela lista pagamentos próximos.
+    paymentTermDays: integer("payment_term_days").notNull().default(0),
+    dueDate: date("due_date"),
+    paymentStatus: text("payment_status", { enum: PAYMENT_STATUSES })
+      .notNull()
+      .default("pendente"),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    observacao: text("observacao"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
-  (table) => [index("stock_purchases_item_idx").on(table.stockItemId)]
+  (table) => [
+    index("stock_purchases_item_idx").on(table.stockItemId),
+    index("stock_purchases_payment_status_idx").on(table.paymentStatus),
+  ]
 );
 
 export const sales = pgTable(
@@ -596,3 +655,5 @@ export type PendingSale = typeof pendingSales.$inferSelect;
 export type NewPendingSale = typeof pendingSales.$inferInsert;
 export type NfeEmailAccount = typeof nfeEmailAccounts.$inferSelect;
 export type NfePendente = typeof nfePendentes.$inferSelect;
+export type StockItem = typeof stockItems.$inferSelect;
+export type StockPurchase = typeof stockPurchases.$inferSelect;

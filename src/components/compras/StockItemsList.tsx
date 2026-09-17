@@ -2,13 +2,22 @@ import { PackageSearch } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { StockItemRow } from "@/components/compras/StockItemRow";
 import { NewStockItemForm } from "@/components/compras/NewStockItemForm";
-import type { StockItemRow as StockItemRowData } from "@/actions/stock";
+import type { StockItemAnalytics, StockItemRow as StockItemRowData } from "@/actions/stock";
 
-export function StockItemsList({ items }: { items: StockItemRowData[] }) {
+export function StockItemsList({
+  items,
+  analytics,
+}: {
+  items: StockItemRowData[];
+  analytics: Record<string, StockItemAnalytics>;
+}) {
   return (
     <Card className="p-0 overflow-hidden">
       <div className="flex items-center justify-between border-b border-border px-5 py-3 bg-surface-muted/60">
-        <p className="text-sm font-semibold">Itens em estoque</p>
+        <div>
+          <p className="text-sm font-semibold">Produtos (itens em estoque)</p>
+          <p className="text-xs text-muted mt-0.5">Clique na seta pra ver o histórico de preços de cada item.</p>
+        </div>
         <NewStockItemForm />
       </div>
 
@@ -27,7 +36,8 @@ export function StockItemsList({ items }: { items: StockItemRowData[] }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-muted border-b border-border">
-                <th className="px-4 py-2.5 font-medium">Código</th>
+                <th className="px-2 py-2.5"></th>
+                <th className="px-2 py-2.5 font-medium">Código</th>
                 <th className="px-4 py-2.5 font-medium">Item</th>
                 <th className="px-4 py-2.5 font-medium">Estoque mín.</th>
                 <th className="px-4 py-2.5 font-medium">Estoque atual</th>
@@ -36,7 +46,7 @@ export function StockItemsList({ items }: { items: StockItemRowData[] }) {
             </thead>
             <tbody>
               {items.map((item) => (
-                <StockItemRow key={item.id} item={item} />
+                <StockItemRow key={item.id} item={item} analytics={analytics[item.id]} />
               ))}
             </tbody>
           </table>

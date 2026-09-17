@@ -3,17 +3,21 @@
 import { revalidatePath } from "next/cache";
 import { asc, desc, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/db";
-import { sales, stockItems, stockPurchases } from "@/db/schema";
+import { sales, stockItems, stockPurchases, type PaymentStatus } from "@/db/schema";
 import { stockItemSchema, stockPurchaseSchema } from "@/lib/validations";
 import { toNumber } from "@/lib/calculations";
+import { addDays, daysBetweenInclusive } from "@/lib/dates";
+import { todayISO } from "@/lib/format";
 import type { ActionResult } from "@/actions/products";
 
 export interface StockItemRow {
   id: string;
   internalCode: number;
   name: string;
+  ean: string | null;
   minStock: number;
   active: boolean;
+  criadoAutomaticamente: boolean;
   // Compras - vendas do Mercado Livre já ligadas a esse item (ver /pendentes)
   currentStock: number;
   lowStock: boolean;
@@ -53,8 +57,10 @@ export async function listStockItemsWithStock(opts: { onlyActive?: boolean } = {
       id: item.id,
       internalCode: item.internalCode,
       name: item.name,
+      ean: item.ean,
       minStock: item.minStock,
       active: item.active,
+      criadoAutomaticamente: item.criadoAutomaticamente,
       currentStock,
       lowStock: currentStock <= item.minStock,
     };
@@ -67,6 +73,12 @@ export async function listStockItemsWithStock(opts: { onlyActive?: boolean } = {
 export async function getStockAlerts(): Promise<StockItemRow[]> {
   const rows = await listStockItemsWithStock({ onlyActive: true });
   return rows.filter((r) => r.lowStock).sort((a, b) => a.currentStock - b.currentStock);
+}
+
+/** Itens sem estoque nenhum (zero ou negativo) — subconjunto mais urgente dos de estoque baixo. */
+export async function getOutOfStockItems(): Promise<StockItemRow[]> {
+  const rows = await listStockItemsWithStock({ onlyActive: true });
+  return rows.filter((r) => r.currentStock <= 0).sort((a, b) => a.currentStock - b.currentStock);
 }
 
 function flattenErrors(error: import("zod").ZodError): Record<string, string> {
@@ -84,17 +96,20 @@ export async function createStockItem(
 ): Promise<ActionResult> {
   const parsed = stockItemSchema.safeParse({
     name: String(formData.get("name") ?? ""),
+    ean: String(formData.get("ean") ?? ""),
     minStock: Number(formData.get("minStock") ?? 0),
   });
   if (!parsed.success) return { ok: false, errors: flattenErrors(parsed.error) };
 
   await db.insert(stockItems).values({
     name: parsed.data.name,
+    ean: parsed.data.ean || null,
     minStock: parsed.data.minStock,
   });
 
   revalidatePath("/compras");
   revalidatePath("/pendentes");
+  revalidatePath("/notas-fiscais");
   revalidatePath("/");
   return { ok: true };
 }
@@ -106,17 +121,19 @@ export async function updateStockItem(
 ): Promise<ActionResult> {
   const parsed = stockItemSchema.safeParse({
     name: String(formData.get("name") ?? ""),
+    ean: String(formData.get("ean") ?? ""),
     minStock: Number(formData.get("minStock") ?? 0),
   });
   if (!parsed.success) return { ok: false, errors: flattenErrors(parsed.error) };
 
   await db
     .update(stockItems)
-    .set({ name: parsed.data.name, minStock: parsed.data.minStock, updatedAt: new Date() })
+    .set({ name: parsed.data.name, ean: parsed.data.ean || null, minStock: parsed.data.minStock, updatedAt: new Date() })
     .where(eq(stockItems.id, id));
 
   revalidatePath("/compras");
   revalidatePath("/pendentes");
+  revalidatePath("/notas-fiscais");
   revalidatePath("/");
   return { ok: true };
 }
@@ -125,6 +142,12 @@ export async function toggleStockItemActive(id: string, active: boolean) {
   await db.update(stockItems).set({ active, updatedAt: new Date() }).where(eq(stockItems.id, id));
   revalidatePath("/compras");
   revalidatePath("/pendentes");
+}
+
+/** Dispensa o aviso "PRODUTO NOVO" de um item criado automaticamente a partir de uma NF-e. */
+export async function dismissNovoStockItem(id: string) {
+  await db.update(stockItems).set({ criadoAutomaticamente: false, updatedAt: new Date() }).where(eq(stockItems.id, id));
+  revalidatePath("/compras");
 }
 
 export interface PurchaseRow {
@@ -138,9 +161,20 @@ export interface PurchaseRow {
   quantity: number;
   totalCost: number;
   paymentMethod: string;
+  origem: "nf" | "sem_nf";
+  notaFiscalNumero: string | null;
+  produtoNovo: boolean;
+  paymentTermDays: number;
+  dueDate: string | null;
+  paymentStatus: PaymentStatus;
+  observacao: string | null;
 }
 
-export async function listPurchases(limit = 30): Promise<PurchaseRow[]> {
+export type PurchaseFilter = "todas" | "nf" | "sem_nf" | "pendente" | "pago";
+
+export async function listPurchases(opts: { limit?: number; filtro?: PurchaseFilter } = {}): Promise<PurchaseRow[]> {
+  const { limit = 200, filtro = "todas" } = opts;
+
   const rows = await db
     .select({
       id: stockPurchases.id,
@@ -152,17 +186,37 @@ export async function listPurchases(limit = 30): Promise<PurchaseRow[]> {
       unitCost: stockPurchases.unitCost,
       quantity: stockPurchases.quantity,
       paymentMethod: stockPurchases.paymentMethod,
+      origem: stockPurchases.origem,
+      notaFiscalNumero: stockPurchases.notaFiscalNumero,
+      produtoNovo: stockPurchases.produtoNovo,
+      paymentTermDays: stockPurchases.paymentTermDays,
+      dueDate: stockPurchases.dueDate,
+      paymentStatus: stockPurchases.paymentStatus,
+      observacao: stockPurchases.observacao,
     })
     .from(stockPurchases)
     .innerJoin(stockItems, eq(stockPurchases.stockItemId, stockItems.id))
     .orderBy(desc(stockPurchases.purchaseDate), desc(stockPurchases.createdAt))
     .limit(limit);
 
-  return rows.map((row) => ({
+  const mapped = rows.map((row) => ({
     ...row,
     unitCost: toNumber(row.unitCost),
     totalCost: toNumber(row.unitCost) * row.quantity,
   }));
+
+  switch (filtro) {
+    case "nf":
+      return mapped.filter((r) => r.origem === "nf");
+    case "sem_nf":
+      return mapped.filter((r) => r.origem === "sem_nf");
+    case "pendente":
+      return mapped.filter((r) => r.paymentStatus === "pendente");
+    case "pago":
+      return mapped.filter((r) => r.paymentStatus === "pago");
+    default:
+      return mapped;
+  }
 }
 
 export async function createPurchase(
@@ -176,8 +230,12 @@ export async function createPurchase(
     unitCost: Number(formData.get("unitCost") ?? 0),
     quantity: Number(formData.get("quantity") ?? 1),
     paymentMethod: String(formData.get("paymentMethod") ?? ""),
+    paymentTermDays: Number(formData.get("paymentTermDays") ?? 0),
+    observacao: String(formData.get("observacao") ?? ""),
   });
   if (!parsed.success) return { ok: false, errors: flattenErrors(parsed.error) };
+
+  const dueDate = addDays(parsed.data.purchaseDate, parsed.data.paymentTermDays);
 
   await db.insert(stockPurchases).values({
     stockItemId: parsed.data.stockItemId,
@@ -186,6 +244,13 @@ export async function createPurchase(
     unitCost: parsed.data.unitCost.toString(),
     quantity: parsed.data.quantity,
     paymentMethod: parsed.data.paymentMethod,
+    // Toda compra cadastrada por esse formulário (Compras → "Nova compra
+    // sem NF") é sem_nf — o único jeito de gravar origem "nf" é aprovando
+    // a nota em /notas-fiscais (ver actions/nfe.ts).
+    origem: "sem_nf",
+    paymentTermDays: parsed.data.paymentTermDays,
+    dueDate,
+    observacao: parsed.data.observacao || null,
   });
 
   revalidatePath("/compras");
@@ -199,4 +264,216 @@ export async function deletePurchase(id: string) {
   revalidatePath("/compras");
   revalidatePath("/pendentes");
   revalidatePath("/");
+}
+
+export async function setPurchasePaymentStatus(id: string, status: PaymentStatus) {
+  await db
+    .update(stockPurchases)
+    .set({ paymentStatus: status, paidAt: status === "pago" ? new Date() : null })
+    .where(eq(stockPurchases.id, id));
+  revalidatePath("/compras");
+  revalidatePath("/");
+}
+
+export interface UpcomingPaymentRow {
+  id: string;
+  itemName: string;
+  supplier: string;
+  totalCost: number;
+  dueDate: string;
+  daysUntilDue: number;
+  overdue: boolean;
+  paymentMethod: string;
+}
+
+/**
+ * Compras ainda não pagas com prazo definido, ordenadas pela data de
+ * vencimento — usado no card "Pagamentos próximos" do dashboard. Inclui
+ * também as já vencidas (daysUntilDue negativo), pra não deixar passar
+ * batido.
+ */
+export async function getUpcomingPayments(limit = 8): Promise<UpcomingPaymentRow[]> {
+  const rows = await db
+    .select({
+      id: stockPurchases.id,
+      itemName: stockItems.name,
+      supplier: stockPurchases.supplier,
+      unitCost: stockPurchases.unitCost,
+      quantity: stockPurchases.quantity,
+      dueDate: stockPurchases.dueDate,
+      paymentMethod: stockPurchases.paymentMethod,
+    })
+    .from(stockPurchases)
+    .innerJoin(stockItems, eq(stockPurchases.stockItemId, stockItems.id))
+    .where(eq(stockPurchases.paymentStatus, "pendente"));
+
+  const today = todayISO();
+  return rows
+    .filter((r): r is typeof r & { dueDate: string } => Boolean(r.dueDate))
+    .map((r) => ({
+      id: r.id,
+      itemName: r.itemName,
+      supplier: r.supplier,
+      totalCost: toNumber(r.unitCost) * r.quantity,
+      dueDate: r.dueDate,
+      daysUntilDue: daysBetweenInclusive(today, r.dueDate) - 1,
+      overdue: r.dueDate < today,
+      paymentMethod: r.paymentMethod,
+    }))
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+    .slice(0, limit);
+}
+
+export interface PriceStats {
+  min: number;
+  max: number;
+  last: number;
+  avg: number;
+  lastSupplier: string;
+  lastOrigem: "nf" | "sem_nf";
+}
+
+export interface PriceChartPoint {
+  label: string;
+  avgPrice: number | null;
+  quantitySold: number;
+}
+
+export interface StockItemAnalytics {
+  history: PurchaseRow[];
+  stats: PriceStats | null;
+  chart: PriceChartPoint[];
+}
+
+const CHART_MONTHS_BACK = 6;
+const MONTH_ABBR = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+
+function lastNYearMonths(n: number): string[] {
+  const out: string[] = [];
+  const now = new Date();
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  }
+  return out;
+}
+
+function monthLabelAbbr(yearMonth: string): string {
+  const [y, m] = yearMonth.split("-").map(Number);
+  return `${MONTH_ABBR[m - 1]}/${String(y).slice(2)}`;
+}
+
+/**
+ * Histórico de compras, estatísticas de preço (mín/máx/último/médio) e uma
+ * série mensal de preço médio de compra x quantidade vendida, por item de
+ * estoque — usado no detalhe de cada item em Compras (histórico de preços
+ * + gráfico de preço x vendas). Calculado tudo de uma vez pra tela inteira
+ * em vez de uma consulta por item, já que o catálogo é pequeno.
+ */
+export async function getStockAnalytics(): Promise<Record<string, StockItemAnalytics>> {
+  const months = lastNYearMonths(CHART_MONTHS_BACK);
+  const monthIndex = new Map(months.map((m, i) => [m, i]));
+
+  const [purchases, salesRows] = await Promise.all([
+    db
+      .select({
+        id: stockPurchases.id,
+        stockItemId: stockPurchases.stockItemId,
+        itemName: stockItems.name,
+        itemInternalCode: stockItems.internalCode,
+        purchaseDate: stockPurchases.purchaseDate,
+        supplier: stockPurchases.supplier,
+        unitCost: stockPurchases.unitCost,
+        quantity: stockPurchases.quantity,
+        paymentMethod: stockPurchases.paymentMethod,
+        origem: stockPurchases.origem,
+        notaFiscalNumero: stockPurchases.notaFiscalNumero,
+        produtoNovo: stockPurchases.produtoNovo,
+        paymentTermDays: stockPurchases.paymentTermDays,
+        dueDate: stockPurchases.dueDate,
+        paymentStatus: stockPurchases.paymentStatus,
+        observacao: stockPurchases.observacao,
+      })
+      .from(stockPurchases)
+      .innerJoin(stockItems, eq(stockPurchases.stockItemId, stockItems.id))
+      .orderBy(desc(stockPurchases.purchaseDate), desc(stockPurchases.createdAt)),
+    db
+      .select({ stockItemId: sales.stockItemId, quantity: sales.quantity, saleDate: sales.saleDate })
+      .from(sales)
+      .where(isNotNull(sales.stockItemId)),
+  ]);
+
+  const byItem = new Map<string, PurchaseRow[]>();
+  for (const row of purchases) {
+    const mapped: PurchaseRow = {
+      ...row,
+      unitCost: toNumber(row.unitCost),
+      totalCost: toNumber(row.unitCost) * row.quantity,
+    };
+    const list = byItem.get(row.stockItemId) ?? [];
+    list.push(mapped);
+    byItem.set(row.stockItemId, list);
+  }
+
+  // Preço médio de compra por item x mês (só meses com pelo menos uma
+  // compra registrada — meses sem compra ficam com avgPrice nulo no
+  // gráfico, sem inventar um valor).
+  const priceByItemMonth = new Map<string, Map<number, { sum: number; count: number }>>();
+  for (const row of purchases) {
+    const ym = row.purchaseDate.slice(0, 7);
+    const idx = monthIndex.get(ym);
+    if (idx === undefined) continue;
+    const perMonth = priceByItemMonth.get(row.stockItemId) ?? new Map();
+    const entry = perMonth.get(idx) ?? { sum: 0, count: 0 };
+    entry.sum += toNumber(row.unitCost);
+    entry.count += 1;
+    perMonth.set(idx, entry);
+    priceByItemMonth.set(row.stockItemId, perMonth);
+  }
+
+  // Quantidade vendida por item x mês.
+  const salesByItemMonth = new Map<string, Map<number, number>>();
+  for (const row of salesRows) {
+    if (!row.stockItemId) continue;
+    const ym = row.saleDate.slice(0, 7);
+    const idx = monthIndex.get(ym);
+    if (idx === undefined) continue;
+    const perMonth = salesByItemMonth.get(row.stockItemId) ?? new Map();
+    perMonth.set(idx, (perMonth.get(idx) ?? 0) + row.quantity);
+    salesByItemMonth.set(row.stockItemId, perMonth);
+  }
+
+  const result: Record<string, StockItemAnalytics> = {};
+  const allItemIds = new Set<string>([...byItem.keys(), ...salesByItemMonth.keys()]);
+  for (const itemId of allItemIds) {
+    const history = byItem.get(itemId) ?? [];
+    let stats: PriceStats | null = null;
+    if (history.length > 0) {
+      const costs = history.map((h) => h.unitCost);
+      const sorted = [...history].sort((a, b) => b.purchaseDate.localeCompare(a.purchaseDate));
+      stats = {
+        min: Math.min(...costs),
+        max: Math.max(...costs),
+        last: sorted[0].unitCost,
+        avg: costs.reduce((a, b) => a + b, 0) / costs.length,
+        lastSupplier: sorted[0].supplier,
+        lastOrigem: sorted[0].origem,
+      };
+    }
+
+    const priceMonths = priceByItemMonth.get(itemId);
+    const saleMonths = salesByItemMonth.get(itemId);
+    const chart: PriceChartPoint[] = months.map((ym, idx) => {
+      const priceEntry = priceMonths?.get(idx);
+      return {
+        label: monthLabelAbbr(ym),
+        avgPrice: priceEntry ? Math.round((priceEntry.sum / priceEntry.count) * 100) / 100 : null,
+        quantitySold: saleMonths?.get(idx) ?? 0,
+      };
+    });
+
+    result[itemId] = { history, stats, chart };
+  }
+
+  return result;
 }
