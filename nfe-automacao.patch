@@ -1,0 +1,2896 @@
+From 6ce6dda51adf4f94c5a62bf84355d66fa70e9413 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 17 Sep 2026 17:55:42 +0000
+Subject: [PATCH 1/2] Adiciona pagina de politica de privacidade para o app
+ OAuth do Gmail
+
+---
+ src/app/privacidade/page.tsx | 73 ++++++++++++++++++++++++++++++++++++
+ 1 file changed, 73 insertions(+)
+ create mode 100644 src/app/privacidade/page.tsx
+
+diff --git a/src/app/privacidade/page.tsx b/src/app/privacidade/page.tsx
+new file mode 100644
+index 0000000..b30c70c
+--- /dev/null
++++ b/src/app/privacidade/page.tsx
+@@ -0,0 +1,73 @@
++export const metadata = {
++  title: "Política de Privacidade — ML Vendas NFe",
++};
++
++export default function PrivacidadePage() {
++  return (
++    <div className="mx-auto max-w-2xl px-4 py-10 text-sm leading-relaxed text-foreground">
++      <h1 className="text-xl font-bold mb-1">Política de Privacidade</h1>
++      <p className="text-muted mb-6">Painel de Vendas — ML Vendas NFe</p>
++
++      <p className="mb-4">
++        Este é um aplicativo de uso interno, desenvolvido para controle de vendas, estoque e
++        notas fiscais de um pequeno negócio familiar que revende produtos no Mercado Livre. Ele
++        não é um serviço público e não é oferecido a terceiros.
++      </p>
++
++      <h2 className="font-semibold mt-6 mb-2">Quais dados o app acessa</h2>
++      <p className="mb-4">
++        Para automatizar o registro de compras de mercadoria, o app pode solicitar acesso de
++        leitura (somente leitura) à caixa de entrada do Gmail dos e-mails autorizados pelos
++        próprios donos do negócio. Esse acesso é usado exclusivamente para:
++      </p>
++      <ul className="list-disc pl-5 mb-4 space-y-1">
++        <li>
++          Identificar e-mails de fornecedores que contenham Notas Fiscais Eletrônicas (NF-e) em
++          formato XML anexado;
++        </li>
++        <li>
++          Extrair automaticamente os dados dessa nota (fornecedor, itens, quantidades e valores)
++          para apresentar como uma pendência de conferência dentro do próprio app, antes de
++          qualquer atualização real de estoque.
++        </li>
++      </ul>
++
++      <h2 className="font-semibold mt-6 mb-2">O que não é feito com esses dados</h2>
++      <ul className="list-disc pl-5 mb-4 space-y-1">
++        <li>Os e-mails não são compartilhados, vendidos ou repassados a terceiros;</li>
++        <li>Os dados não são usados para publicidade;</li>
++        <li>
++          Nenhum e-mail é apagado, respondido ou enviado em nome do usuário — o acesso é somente
++          de leitura;
++        </li>
++        <li>
++          Os dados extraídos ficam armazenados apenas no banco de dados privado deste aplicativo,
++          usado somente pelos donos do negócio.
++        </li>
++      </ul>
++
++      <h2 className="font-semibold mt-6 mb-2">Revogação de acesso</h2>
++      <p className="mb-4">
++        O acesso concedido ao app pode ser revogado a qualquer momento em{" "}
++        <a
++          href="https://myaccount.google.com/permissions"
++          className="text-brand underline"
++          target="_blank"
++          rel="noreferrer"
++        >
++          myaccount.google.com/permissions
++        </a>
++        .
++      </p>
++
++      <h2 className="font-semibold mt-6 mb-2">Contato</h2>
++      <p>
++        Dúvidas sobre esta política podem ser enviadas para{" "}
++        <a href="mailto:jlmhaag123@gmail.com" className="text-brand underline">
++          jlmhaag123@gmail.com
++        </a>
++        .
++      </p>
++    </div>
++  );
++}
+-- 
+2.43.0
+
+
+From 97cd35eca5cf169f287b37185c8f8b85a32250e8 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 17 Sep 2026 18:17:22 +0000
+Subject: [PATCH 2/2] Adiciona automacao de NF-e por e-mail: OAuth Gmail,
+ parser de XML e tela de aprovacao
+
+---
+ drizzle/0014_nfe_email_automation.sql         |   35 +
+ drizzle/meta/0014_snapshot.json               | 1289 +++++++++++++++++
+ drizzle/meta/_journal.json                    |    7 +
+ package-lock.json                             |  121 ++
+ package.json                                  |    1 +
+ src/actions/nfe.ts                            |  137 ++
+ src/app/api/email-nfe/authorize/route.ts      |   25 +
+ src/app/api/email-nfe/callback/route.ts       |   39 +
+ src/app/api/email-nfe/scan/route.ts           |   35 +
+ src/app/notas-fiscais/page.tsx                |   77 +
+ src/components/nav/NavLinks.tsx               |    3 +-
+ .../notas-fiscais/EmailAccountsPanel.tsx      |   86 ++
+ .../notas-fiscais/NfePendenteCard.tsx         |  161 ++
+ src/db/schema.ts                              |   84 ++
+ src/lib/gmail-nfe.ts                          |  466 ++++++
+ src/lib/validations.ts                        |    9 +
+ 16 files changed, 2574 insertions(+), 1 deletion(-)
+ create mode 100644 drizzle/0014_nfe_email_automation.sql
+ create mode 100644 drizzle/meta/0014_snapshot.json
+ create mode 100644 src/actions/nfe.ts
+ create mode 100644 src/app/api/email-nfe/authorize/route.ts
+ create mode 100644 src/app/api/email-nfe/callback/route.ts
+ create mode 100644 src/app/api/email-nfe/scan/route.ts
+ create mode 100644 src/app/notas-fiscais/page.tsx
+ create mode 100644 src/components/notas-fiscais/EmailAccountsPanel.tsx
+ create mode 100644 src/components/notas-fiscais/NfePendenteCard.tsx
+ create mode 100644 src/lib/gmail-nfe.ts
+
+diff --git a/drizzle/0014_nfe_email_automation.sql b/drizzle/0014_nfe_email_automation.sql
+new file mode 100644
+index 0000000..a0eb76a
+--- /dev/null
++++ b/drizzle/0014_nfe_email_automation.sql
+@@ -0,0 +1,35 @@
++CREATE TABLE "nfe_email_accounts" (
++	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
++	"email" text NOT NULL,
++	"access_token" text NOT NULL,
++	"refresh_token" text NOT NULL,
++	"expires_at" timestamp with time zone NOT NULL,
++	"scope" text,
++	"last_scanned_at" timestamp with time zone,
++	"last_scan_error" text,
++	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
++	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
++	CONSTRAINT "nfe_email_accounts_email_unique" UNIQUE("email")
++);
++--> statement-breakpoint
++CREATE TABLE "nfe_pendentes" (
++	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
++	"email_account_id" uuid NOT NULL,
++	"gmail_message_id" text NOT NULL,
++	"fornecedor_cnpj" text,
++	"fornecedor_nome" text NOT NULL,
++	"numero_nota" text,
++	"serie_nota" text,
++	"data_emissao" date,
++	"valor_total" numeric(12, 2) NOT NULL,
++	"forma_pagamento_sugerida" text,
++	"itens" jsonb NOT NULL,
++	"status" text DEFAULT 'pendente' NOT NULL,
++	"erro" text,
++	"recebida_em" timestamp with time zone DEFAULT now() NOT NULL,
++	"processada_em" timestamp with time zone,
++	CONSTRAINT "nfe_pendentes_gmail_message_id_unique" UNIQUE("gmail_message_id")
++);
++--> statement-breakpoint
++ALTER TABLE "nfe_pendentes" ADD CONSTRAINT "nfe_pendentes_email_account_id_nfe_email_accounts_id_fk" FOREIGN KEY ("email_account_id") REFERENCES "public"."nfe_email_accounts"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
++CREATE INDEX "nfe_pendentes_status_idx" ON "nfe_pendentes" USING btree ("status");
+\ No newline at end of file
+diff --git a/drizzle/meta/0014_snapshot.json b/drizzle/meta/0014_snapshot.json
+new file mode 100644
+index 0000000..300023d
+--- /dev/null
++++ b/drizzle/meta/0014_snapshot.json
+@@ -0,0 +1,1289 @@
++{
++  "id": "c2587910-8e33-4324-8351-2ae543de2c1f",
++  "prevId": "8c67ea7b-8f27-4ece-8e5c-45ea81d963a7",
++  "version": "7",
++  "dialect": "postgresql",
++  "tables": {
++    "public.mercadolivre_credentials": {
++      "name": "mercadolivre_credentials",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "ml_user_id": {
++          "name": "ml_user_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "nickname": {
++          "name": "nickname",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "access_token": {
++          "name": "access_token",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "refresh_token": {
++          "name": "refresh_token",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "expires_at": {
++          "name": "expires_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "scope": {
++          "name": "scope",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {},
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "mercadolivre_credentials_ml_user_id_unique": {
++          "name": "mercadolivre_credentials_ml_user_id_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "ml_user_id"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.monthly_goals": {
++      "name": "monthly_goals",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "year_month": {
++          "name": "year_month",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "goal_value": {
++          "name": "goal_value",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {},
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "monthly_goals_year_month_unique": {
++          "name": "monthly_goals_year_month_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "year_month"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.nfe_email_accounts": {
++      "name": "nfe_email_accounts",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "email": {
++          "name": "email",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "access_token": {
++          "name": "access_token",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "refresh_token": {
++          "name": "refresh_token",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "expires_at": {
++          "name": "expires_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "scope": {
++          "name": "scope",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "last_scanned_at": {
++          "name": "last_scanned_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "last_scan_error": {
++          "name": "last_scan_error",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {},
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "nfe_email_accounts_email_unique": {
++          "name": "nfe_email_accounts_email_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "email"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.nfe_pendentes": {
++      "name": "nfe_pendentes",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "email_account_id": {
++          "name": "email_account_id",
++          "type": "uuid",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "gmail_message_id": {
++          "name": "gmail_message_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "fornecedor_cnpj": {
++          "name": "fornecedor_cnpj",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "fornecedor_nome": {
++          "name": "fornecedor_nome",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "numero_nota": {
++          "name": "numero_nota",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "serie_nota": {
++          "name": "serie_nota",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "data_emissao": {
++          "name": "data_emissao",
++          "type": "date",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "valor_total": {
++          "name": "valor_total",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "forma_pagamento_sugerida": {
++          "name": "forma_pagamento_sugerida",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "itens": {
++          "name": "itens",
++          "type": "jsonb",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "status": {
++          "name": "status",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'pendente'"
++        },
++        "erro": {
++          "name": "erro",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "recebida_em": {
++          "name": "recebida_em",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "processada_em": {
++          "name": "processada_em",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": false
++        }
++      },
++      "indexes": {
++        "nfe_pendentes_status_idx": {
++          "name": "nfe_pendentes_status_idx",
++          "columns": [
++            {
++              "expression": "status",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        }
++      },
++      "foreignKeys": {
++        "nfe_pendentes_email_account_id_nfe_email_accounts_id_fk": {
++          "name": "nfe_pendentes_email_account_id_nfe_email_accounts_id_fk",
++          "tableFrom": "nfe_pendentes",
++          "tableTo": "nfe_email_accounts",
++          "columnsFrom": [
++            "email_account_id"
++          ],
++          "columnsTo": [
++            "id"
++          ],
++          "onDelete": "cascade",
++          "onUpdate": "no action"
++        }
++      },
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "nfe_pendentes_gmail_message_id_unique": {
++          "name": "nfe_pendentes_gmail_message_id_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "gmail_message_id"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.pending_sales": {
++      "name": "pending_sales",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "ml_order_id": {
++          "name": "ml_order_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_order_item_id": {
++          "name": "ml_order_item_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_seller_id": {
++          "name": "ml_seller_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_pack_id": {
++          "name": "ml_pack_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "title_snapshot": {
++          "name": "title_snapshot",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "quantity": {
++          "name": "quantity",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true,
++          "default": 1
++        },
++        "unit_price_snapshot": {
++          "name": "unit_price_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_sale_fee_snapshot": {
++          "name": "ml_sale_fee_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_shipping_cost_snapshot": {
++          "name": "ml_shipping_cost_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "order_date": {
++          "name": "order_date",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "order_status_ml": {
++          "name": "order_status_ml",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "buyer_nickname": {
++          "name": "buyer_nickname",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "buyer_full_name": {
++          "name": "buyer_full_name",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "raw_order_payload": {
++          "name": "raw_order_payload",
++          "type": "jsonb",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "status": {
++          "name": "status",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'pendente'"
++        },
++        "matched_product_id": {
++          "name": "matched_product_id",
++          "type": "uuid",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "product_cost_manual": {
++          "name": "product_cost_manual",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "dispatched_by": {
++          "name": "dispatched_by",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "resulting_sale_id": {
++          "name": "resulting_sale_id",
++          "type": "uuid",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {
++        "pending_sales_status_idx": {
++          "name": "pending_sales_status_idx",
++          "columns": [
++            {
++              "expression": "status",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        }
++      },
++      "foreignKeys": {
++        "pending_sales_matched_product_id_products_id_fk": {
++          "name": "pending_sales_matched_product_id_products_id_fk",
++          "tableFrom": "pending_sales",
++          "tableTo": "products",
++          "columnsFrom": [
++            "matched_product_id"
++          ],
++          "columnsTo": [
++            "id"
++          ],
++          "onDelete": "set null",
++          "onUpdate": "no action"
++        },
++        "pending_sales_resulting_sale_id_sales_id_fk": {
++          "name": "pending_sales_resulting_sale_id_sales_id_fk",
++          "tableFrom": "pending_sales",
++          "tableTo": "sales",
++          "columnsFrom": [
++            "resulting_sale_id"
++          ],
++          "columnsTo": [
++            "id"
++          ],
++          "onDelete": "set null",
++          "onUpdate": "no action"
++        }
++      },
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "pending_sales_order_item_unique": {
++          "name": "pending_sales_order_item_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "ml_order_id",
++            "ml_order_item_id"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.products": {
++      "name": "products",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "internal_code": {
++          "name": "internal_code",
++          "type": "serial",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "name": {
++          "name": "name",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "image_url": {
++          "name": "image_url",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "is_kit": {
++          "name": "is_kit",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true,
++          "default": false
++        },
++        "kit_quantity": {
++          "name": "kit_quantity",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true,
++          "default": 1
++        },
++        "unit_price": {
++          "name": "unit_price",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "sale_fee_type": {
++          "name": "sale_fee_type",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'percentual'"
++        },
++        "sale_fee_value": {
++          "name": "sale_fee_value",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "free_shipping": {
++          "name": "free_shipping",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true,
++          "default": false
++        },
++        "shipping_cost": {
++          "name": "shipping_cost",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "packaging_cost": {
++          "name": "packaging_cost",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "product_cost": {
++          "name": "product_cost",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "active": {
++          "name": "active",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true,
++          "default": true
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {
++        "products_name_idx": {
++          "name": "products_name_idx",
++          "columns": [
++            {
++              "expression": "name",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        }
++      },
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "products_internal_code_unique": {
++          "name": "products_internal_code_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "internal_code"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.sales": {
++      "name": "sales",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "product_id": {
++          "name": "product_id",
++          "type": "uuid",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "source": {
++          "name": "source",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'manual'"
++        },
++        "product_name_snapshot": {
++          "name": "product_name_snapshot",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_order_id": {
++          "name": "ml_order_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_pack_id": {
++          "name": "ml_pack_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_payment_id": {
++          "name": "ml_payment_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "buyer_nickname": {
++          "name": "buyer_nickname",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "buyer_full_name": {
++          "name": "buyer_full_name",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "quantity": {
++          "name": "quantity",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true,
++          "default": 1
++        },
++        "sale_date": {
++          "name": "sale_date",
++          "type": "date",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "order_status": {
++          "name": "order_status",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'pendente'"
++        },
++        "notes": {
++          "name": "notes",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "dispatched_by": {
++          "name": "dispatched_by",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'juan'"
++        },
++        "operational_fee_percent_snapshot": {
++          "name": "operational_fee_percent_snapshot",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'5'"
++        },
++        "reserve_percent_snapshot": {
++          "name": "reserve_percent_snapshot",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'30'"
++        },
++        "donation_percent_snapshot": {
++          "name": "donation_percent_snapshot",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'10'"
++        },
++        "unit_price_snapshot": {
++          "name": "unit_price_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "kit_quantity_snapshot": {
++          "name": "kit_quantity_snapshot",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "sale_fee_type_snapshot": {
++          "name": "sale_fee_type_snapshot",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "sale_fee_value_snapshot": {
++          "name": "sale_fee_value_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "free_shipping_snapshot": {
++          "name": "free_shipping_snapshot",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "shipping_cost_snapshot": {
++          "name": "shipping_cost_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "packaging_cost_snapshot": {
++          "name": "packaging_cost_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "product_cost_snapshot": {
++          "name": "product_cost_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_sale_fee_total_snapshot": {
++          "name": "ml_sale_fee_total_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_shipping_total_snapshot": {
++          "name": "ml_shipping_total_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "product_cost_manual_snapshot": {
++          "name": "product_cost_manual_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_seller_id": {
++          "name": "ml_seller_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "stock_item_id": {
++          "name": "stock_item_id",
++          "type": "uuid",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "money_release_date": {
++          "name": "money_release_date",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "money_release_status": {
++          "name": "money_release_status",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "money_release_checked_at": {
++          "name": "money_release_checked_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {
++        "sales_product_id_idx": {
++          "name": "sales_product_id_idx",
++          "columns": [
++            {
++              "expression": "product_id",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        },
++        "sales_sale_date_idx": {
++          "name": "sales_sale_date_idx",
++          "columns": [
++            {
++              "expression": "sale_date",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        },
++        "sales_order_status_idx": {
++          "name": "sales_order_status_idx",
++          "columns": [
++            {
++              "expression": "order_status",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        },
++        "sales_money_release_status_idx": {
++          "name": "sales_money_release_status_idx",
++          "columns": [
++            {
++              "expression": "money_release_status",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        },
++        "sales_stock_item_id_idx": {
++          "name": "sales_stock_item_id_idx",
++          "columns": [
++            {
++              "expression": "stock_item_id",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        }
++      },
++      "foreignKeys": {
++        "sales_product_id_products_id_fk": {
++          "name": "sales_product_id_products_id_fk",
++          "tableFrom": "sales",
++          "tableTo": "products",
++          "columnsFrom": [
++            "product_id"
++          ],
++          "columnsTo": [
++            "id"
++          ],
++          "onDelete": "set null",
++          "onUpdate": "no action"
++        },
++        "sales_stock_item_id_stock_items_id_fk": {
++          "name": "sales_stock_item_id_stock_items_id_fk",
++          "tableFrom": "sales",
++          "tableTo": "stock_items",
++          "columnsFrom": [
++            "stock_item_id"
++          ],
++          "columnsTo": [
++            "id"
++          ],
++          "onDelete": "set null",
++          "onUpdate": "no action"
++        }
++      },
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {},
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.settings": {
++      "name": "settings",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "text",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "'default'"
++        },
++        "operational_fee_percent": {
++          "name": "operational_fee_percent",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'5'"
++        },
++        "reserve_percent": {
++          "name": "reserve_percent",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'30'"
++        },
++        "donation_percent": {
++          "name": "donation_percent",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'10'"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {},
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {},
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.stock_items": {
++      "name": "stock_items",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "internal_code": {
++          "name": "internal_code",
++          "type": "serial",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "name": {
++          "name": "name",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "min_stock": {
++          "name": "min_stock",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true,
++          "default": 0
++        },
++        "active": {
++          "name": "active",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true,
++          "default": true
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {
++        "stock_items_name_idx": {
++          "name": "stock_items_name_idx",
++          "columns": [
++            {
++              "expression": "name",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        }
++      },
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "stock_items_internal_code_unique": {
++          "name": "stock_items_internal_code_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "internal_code"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.stock_purchases": {
++      "name": "stock_purchases",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "stock_item_id": {
++          "name": "stock_item_id",
++          "type": "uuid",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "purchase_date": {
++          "name": "purchase_date",
++          "type": "date",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "supplier": {
++          "name": "supplier",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "unit_cost": {
++          "name": "unit_cost",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "quantity": {
++          "name": "quantity",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "payment_method": {
++          "name": "payment_method",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {
++        "stock_purchases_item_idx": {
++          "name": "stock_purchases_item_idx",
++          "columns": [
++            {
++              "expression": "stock_item_id",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        }
++      },
++      "foreignKeys": {
++        "stock_purchases_stock_item_id_stock_items_id_fk": {
++          "name": "stock_purchases_stock_item_id_stock_items_id_fk",
++          "tableFrom": "stock_purchases",
++          "tableTo": "stock_items",
++          "columnsFrom": [
++            "stock_item_id"
++          ],
++          "columnsTo": [
++            "id"
++          ],
++          "onDelete": "restrict",
++          "onUpdate": "no action"
++        }
++      },
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {},
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    }
++  },
++  "enums": {},
++  "schemas": {},
++  "sequences": {},
++  "roles": {},
++  "policies": {},
++  "views": {},
++  "_meta": {
++    "columns": {},
++    "schemas": {},
++    "tables": {}
++  }
++}
+\ No newline at end of file
+diff --git a/drizzle/meta/_journal.json b/drizzle/meta/_journal.json
+index b993ac3..62a8cb8 100755
+--- a/drizzle/meta/_journal.json
++++ b/drizzle/meta/_journal.json
+@@ -99,6 +99,13 @@
+       "when": 1789607601766,
+       "tag": "0013_estoque_compras",
+       "breakpoints": true
++    },
++    {
++      "idx": 14,
++      "version": "7",
++      "when": 1789668889710,
++      "tag": "0014_nfe_email_automation",
++      "breakpoints": true
+     }
+   ]
+ }
+\ No newline at end of file
+diff --git a/package-lock.json b/package-lock.json
+index 1e4eabc..d19536d 100755
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -12,6 +12,7 @@
+         "date-fns": "^4.4.0",
+         "dotenv": "^17.4.2",
+         "drizzle-orm": "^0.45.2",
++        "fast-xml-parser": "^5.11.1",
+         "lucide-react": "^1.38.0",
+         "next": "16.3.4",
+         "postgres": "^3.4.9",
+@@ -2165,6 +2166,18 @@
+         "node": ">= 10"
+       }
+     },
++    "node_modules/@nodable/entities": {
++      "version": "3.0.0",
++      "resolved": "https://registry.npmjs.org/@nodable/entities/-/entities-3.0.0.tgz",
++      "integrity": "sha512-8L9xFeTYKhm49xfIypoe2W5wV1m/3Z58kT+7kR9A8OyFxcPduI4VmxaUMQyKYrRjUoLLSXv6EKKID5Tvj9cUVw==",
++      "funding": [
++        {
++          "type": "github",
++          "url": "https://github.com/sponsors/nodable"
++        }
++      ],
++      "license": "MIT"
++    },
+     "node_modules/@nodelib/fs.scandir": {
+       "version": "2.1.5",
+       "resolved": "https://registry.npmjs.org/@nodelib/fs.scandir/-/fs.scandir-2.1.5.tgz",
+@@ -3344,6 +3357,18 @@
+         "url": "https://github.com/chalk/ansi-styles?sponsor=1"
+       }
+     },
++    "node_modules/anynum": {
++      "version": "1.0.1",
++      "resolved": "https://registry.npmjs.org/anynum/-/anynum-1.0.1.tgz",
++      "integrity": "sha512-N6//FLET/tXYNM/F6ABca1oH6fWB+KlTt909Le28WMDBk8oaT4vY17DCrwg2MvmuqUKt3Ni4N5dGJ/EoBgcO6A==",
++      "funding": [
++        {
++          "type": "github",
++          "url": "https://github.com/sponsors/NaturalIntelligence"
++        }
++      ],
++      "license": "MIT"
++    },
+     "node_modules/argparse": {
+       "version": "2.0.1",
+       "resolved": "https://registry.npmjs.org/argparse/-/argparse-2.0.1.tgz",
+@@ -5044,6 +5069,45 @@
+       "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/fast-xml-builder": {
++      "version": "1.3.1",
++      "resolved": "https://registry.npmjs.org/fast-xml-builder/-/fast-xml-builder-1.3.1.tgz",
++      "integrity": "sha512-pIM/1n3ntFXKYrUZwW7QCK0gAW7XY+wzj1YMIV3tLDvPj/V+zTGJK5e3/4WJfwj0qWw2ElNXiTixda/R+3YSug==",
++      "funding": [
++        {
++          "type": "github",
++          "url": "https://github.com/sponsors/NaturalIntelligence"
++        }
++      ],
++      "license": "MIT",
++      "dependencies": {
++        "path-expression-matcher": "^1.6.2",
++        "xml-naming": "^0.3.0"
++      }
++    },
++    "node_modules/fast-xml-parser": {
++      "version": "5.11.1",
++      "resolved": "https://registry.npmjs.org/fast-xml-parser/-/fast-xml-parser-5.11.1.tgz",
++      "integrity": "sha512-TBw6K/fxoQGGjCmZDw9w/ZwP3uDcnTM4YH/g+PFRWr8sbe5idXtxNN6vITh4+1ruCZaho6uBFurElsA7F0zzgw==",
++      "funding": [
++        {
++          "type": "github",
++          "url": "https://github.com/sponsors/NaturalIntelligence"
++        }
++      ],
++      "license": "MIT",
++      "dependencies": {
++        "@nodable/entities": "^3.0.0",
++        "fast-xml-builder": "^1.2.0",
++        "is-unsafe": "^2.0.0",
++        "path-expression-matcher": "^1.6.2",
++        "strnum": "^2.4.2",
++        "xml-naming": "^0.3.0"
++      },
++      "bin": {
++        "fxparser": "src/cli/cli.js"
++      }
++    },
+     "node_modules/fastq": {
+       "version": "1.20.3",
+       "resolved": "https://registry.npmjs.org/fastq/-/fastq-1.20.3.tgz",
+@@ -5912,6 +5976,18 @@
+         "url": "https://github.com/sponsors/ljharb"
+       }
+     },
++    "node_modules/is-unsafe": {
++      "version": "2.0.2",
++      "resolved": "https://registry.npmjs.org/is-unsafe/-/is-unsafe-2.0.2.tgz",
++      "integrity": "sha512-HgbIHPBH0KHHCcjLfGsCvhtPTVxjaAZlXjwdz7/GQC40SjSe4sfQsar8J5VFo8JOSbarkpV0OLG95bbaNd9aAQ==",
++      "funding": [
++        {
++          "type": "github",
++          "url": "https://github.com/sponsors/NaturalIntelligence"
++        }
++      ],
++      "license": "MIT"
++    },
+     "node_modules/is-weakmap": {
+       "version": "2.0.2",
+       "resolved": "https://registry.npmjs.org/is-weakmap/-/is-weakmap-2.0.2.tgz",
+@@ -6893,6 +6969,21 @@
+         "node": ">=8"
+       }
+     },
++    "node_modules/path-expression-matcher": {
++      "version": "1.6.2",
++      "resolved": "https://registry.npmjs.org/path-expression-matcher/-/path-expression-matcher-1.6.2.tgz",
++      "integrity": "sha512-enSlaiat05iasnzmgNxRj8reFdj3puY2QpNgP1aPIaVfT6nn9ICuPoFlKHk8EN22HcwewshO+mN2DGbkCEOtqQ==",
++      "funding": [
++        {
++          "type": "github",
++          "url": "https://github.com/sponsors/NaturalIntelligence"
++        }
++      ],
++      "license": "MIT",
++      "engines": {
++        "node": ">=14.0.0"
++      }
++    },
+     "node_modules/path-key": {
+       "version": "3.1.1",
+       "resolved": "https://registry.npmjs.org/path-key/-/path-key-3.1.1.tgz",
+@@ -7728,6 +7819,21 @@
+         "url": "https://github.com/sponsors/sindresorhus"
+       }
+     },
++    "node_modules/strnum": {
++      "version": "2.4.2",
++      "resolved": "https://registry.npmjs.org/strnum/-/strnum-2.4.2.tgz",
++      "integrity": "sha512-rDG3Ah4TV0k1hWvLSzkZtMmLN9+eS+h3knq4MP6A42Y3Yh5qGNnOUs1jJkoSr8FG5dsL28c7KgkIBzSEykqtuw==",
++      "funding": [
++        {
++          "type": "github",
++          "url": "https://github.com/sponsors/NaturalIntelligence"
++        }
++      ],
++      "license": "MIT",
++      "dependencies": {
++        "anynum": "^1.0.1"
++      }
++    },
+     "node_modules/styled-jsx": {
+       "version": "5.1.6",
+       "resolved": "https://registry.npmjs.org/styled-jsx/-/styled-jsx-5.1.6.tgz",
+@@ -8775,6 +8881,21 @@
+         "node": ">=0.10.0"
+       }
+     },
++    "node_modules/xml-naming": {
++      "version": "0.3.0",
++      "resolved": "https://registry.npmjs.org/xml-naming/-/xml-naming-0.3.0.tgz",
++      "integrity": "sha512-ghig2TBE/H11aOVgmahA3MhimvkBr6JIYknH/Dhdk10nXwdbIqBJsbfMxpvFPG8bAw77gN29aQWvKpmVoPlvPQ==",
++      "funding": [
++        {
++          "type": "github",
++          "url": "https://github.com/sponsors/NaturalIntelligence"
++        }
++      ],
++      "license": "MIT",
++      "engines": {
++        "node": ">=16.0.0"
++      }
++    },
+     "node_modules/yallist": {
+       "version": "3.1.1",
+       "resolved": "https://registry.npmjs.org/yallist/-/yallist-3.1.1.tgz",
+diff --git a/package.json b/package.json
+index 09dc0d4..0c566ee 100755
+--- a/package.json
++++ b/package.json
+@@ -14,6 +14,7 @@
+     "date-fns": "^4.4.0",
+     "dotenv": "^17.4.2",
+     "drizzle-orm": "^0.45.2",
++    "fast-xml-parser": "^5.11.1",
+     "lucide-react": "^1.38.0",
+     "next": "16.3.4",
+     "postgres": "^3.4.9",
+diff --git a/src/actions/nfe.ts b/src/actions/nfe.ts
+new file mode 100644
+index 0000000..5fe565b
+--- /dev/null
++++ b/src/actions/nfe.ts
+@@ -0,0 +1,137 @@
++"use server";
++
++import { revalidatePath } from "next/cache";
++import { desc, eq } from "drizzle-orm";
++import { db } from "@/db";
++import { nfeEmailAccounts, nfePendentes, stockPurchases, type NfeItemParsed } from "@/db/schema";
++import { approveNfeSchema } from "@/lib/validations";
++import { scanAllAccountsForNfe } from "@/lib/gmail-nfe";
++import type { ActionResult } from "@/actions/products";
++
++export async function listEmailAccounts() {
++  return db.select().from(nfeEmailAccounts).orderBy(nfeEmailAccounts.email);
++}
++
++export async function listNfePendentes() {
++  return db
++    .select()
++    .from(nfePendentes)
++    .where(eq(nfePendentes.status, "pendente"))
++    .orderBy(desc(nfePendentes.recebidaEm));
++}
++
++/**
++ * Dispara a varredura manual das caixas conectadas — usado pelo botão
++ * "Verificar e-mails agora" na tela, além da varredura automática
++ * agendada externamente que chama /api/email-nfe/scan.
++ */
++export async function scanNowAction(): Promise<{ ok: boolean; message: string }> {
++  try {
++    const summary = await scanAllAccountsForNfe();
++    revalidatePath("/notas-fiscais");
++    if (summary.erros.length > 0) {
++      return {
++        ok: false,
++        message: `Varredura concluída com erro em: ${summary.erros
++          .map((e) => e.email)
++          .join(", ")}.`,
++      };
++    }
++    return {
++      ok: true,
++      message:
++        summary.novasPendencias > 0
++          ? `${summary.novasPendencias} nota(s) nova(s) encontrada(s).`
++          : "Nenhuma nota nova encontrada.",
++    };
++  } catch (err) {
++    return { ok: false, message: err instanceof Error ? err.message : "Erro na varredura." };
++  }
++}
++
++function parseItemMappings(formData: FormData, itens: NfeItemParsed[]) {
++  return itens.map((item, index) => ({
++    item,
++    stockItemId: String(formData.get(`item_${index}_stockItemId`) ?? "").trim() || null,
++  }));
++}
++
++/**
++ * Aprova uma NF-e pendente: para cada item da nota ligado a um item de
++ * estoque no formulário, cria uma compra de estoque de verdade
++ * (stock_purchases) com a data e forma de pagamento informadas; itens
++ * deixados em branco são ignorados (não geram compra nenhuma). Só depois
++ * disso a nota muda de status pra "aprovada" — nunca mexe em estoque real
++ * antes da conferência manual.
++ */
++export async function approveNfePendente(
++  nfePendenteId: string,
++  _prevState: ActionResult | null,
++  formData: FormData
++): Promise<ActionResult> {
++  const parsed = approveNfeSchema.safeParse({
++    purchaseDate: String(formData.get("purchaseDate") ?? ""),
++    paymentMethod: String(formData.get("paymentMethod") ?? ""),
++  });
++  if (!parsed.success) {
++    const errors: Record<string, string> = {};
++    for (const issue of parsed.error.issues) {
++      errors[String(issue.path[0])] = issue.message;
++    }
++    return { ok: false, errors };
++  }
++
++  const [nota] = await db
++    .select()
++    .from(nfePendentes)
++    .where(eq(nfePendentes.id, nfePendenteId))
++    .limit(1);
++  if (!nota) {
++    return { ok: false, errors: { form: "Nota não encontrada." } };
++  }
++  if (nota.status !== "pendente") {
++    return { ok: false, errors: { form: "Essa nota já foi processada." } };
++  }
++
++  const mappings = parseItemMappings(formData, nota.itens as NfeItemParsed[]);
++  const selecionados = mappings.filter((m) => m.stockItemId);
++  if (selecionados.length === 0) {
++    return {
++      ok: false,
++      errors: { form: "Selecione o item de estoque de pelo menos uma linha da nota." },
++    };
++  }
++
++  const { purchaseDate, paymentMethod } = parsed.data;
++
++  await db.transaction(async (tx) => {
++    for (const { item, stockItemId } of selecionados) {
++      await tx.insert(stockPurchases).values({
++        stockItemId: stockItemId!,
++        purchaseDate,
++        supplier: nota.fornecedorNome,
++        unitCost: String(item.valorUnitario),
++        quantity: Math.max(1, Math.round(item.quantidade)),
++        paymentMethod,
++      });
++    }
++    await tx
++      .update(nfePendentes)
++      .set({ status: "aprovada", processadaEm: new Date() })
++      .where(eq(nfePendentes.id, nfePendenteId));
++  });
++
++  revalidatePath("/notas-fiscais");
++  revalidatePath("/compras");
++  revalidatePath("/pendentes");
++  revalidatePath("/");
++  return { ok: true };
++}
++
++export async function rejectNfePendente(nfePendenteId: string): Promise<void> {
++  await db
++    .update(nfePendentes)
++    .set({ status: "rejeitada", processadaEm: new Date() })
++    .where(eq(nfePendentes.id, nfePendenteId));
++  revalidatePath("/notas-fiscais");
++}
+diff --git a/src/app/api/email-nfe/authorize/route.ts b/src/app/api/email-nfe/authorize/route.ts
+new file mode 100644
+index 0000000..660d511
+--- /dev/null
++++ b/src/app/api/email-nfe/authorize/route.ts
+@@ -0,0 +1,25 @@
++import { NextResponse } from "next/server";
++import { randomUUID } from "crypto";
++import { buildAuthorizationUrl } from "@/lib/gmail-nfe";
++
++export const dynamic = "force-dynamic";
++
++// Ponto de partida do fluxo OAuth do Gmail: gera um "state" (proteção
++// contra CSRF), guarda em cookie de curta duração e redireciona para a tela
++// de consentimento do Google. Precisa ser aberto pela pessoa dona da conta
++// de e-mail que vai ser conectada (Juan, Djow, etc) — não dá pra automatizar
++// esse clique.
++export async function GET() {
++  const state = randomUUID();
++  const authorizationUrl = buildAuthorizationUrl(state);
++
++  const response = NextResponse.redirect(authorizationUrl);
++  response.cookies.set("gmail_nfe_oauth_state", state, {
++    httpOnly: true,
++    secure: true,
++    sameSite: "lax",
++    maxAge: 10 * 60,
++    path: "/",
++  });
++  return response;
++}
+diff --git a/src/app/api/email-nfe/callback/route.ts b/src/app/api/email-nfe/callback/route.ts
+new file mode 100644
+index 0000000..cd3a69a
+--- /dev/null
++++ b/src/app/api/email-nfe/callback/route.ts
+@@ -0,0 +1,39 @@
++import { NextRequest, NextResponse } from "next/server";
++import { connectEmailAccountFromCode, SITE_ORIGIN } from "@/lib/gmail-nfe";
++
++export const dynamic = "force-dynamic";
++
++// Callback do fluxo OAuth do Gmail. Recebe o código de autorização, valida
++// o "state" (protege contra CSRF) e troca o código pelos tokens, já
++// descobrindo e salvando o e-mail da conta conectada.
++export async function GET(request: NextRequest) {
++  const searchParams = request.nextUrl.searchParams;
++  const code = searchParams.get("code");
++  const state = searchParams.get("state");
++  const error = searchParams.get("error");
++
++  const expectedState = request.cookies.get("gmail_nfe_oauth_state")?.value;
++
++  const redirectTo = (path: string) => {
++    const response = NextResponse.redirect(new URL(path, SITE_ORIGIN));
++    response.cookies.delete("gmail_nfe_oauth_state");
++    return response;
++  };
++
++  if (error) {
++    return redirectTo(`/notas-fiscais?email_erro=${encodeURIComponent(error)}`);
++  }
++
++  if (!code || !state || !expectedState || state !== expectedState) {
++    return redirectTo("/notas-fiscais?email_erro=state_invalido");
++  }
++
++  try {
++    const email = await connectEmailAccountFromCode(code);
++    return redirectTo(`/notas-fiscais?email_conectado=${encodeURIComponent(email)}`);
++  } catch (err) {
++    console.error("Falha ao conectar conta de e-mail para NF-e:", err);
++    const mensagem = err instanceof Error ? err.message : "erro_desconhecido";
++    return redirectTo(`/notas-fiscais?email_erro=${encodeURIComponent(mensagem)}`);
++  }
++}
+diff --git a/src/app/api/email-nfe/scan/route.ts b/src/app/api/email-nfe/scan/route.ts
+new file mode 100644
+index 0000000..4f720f5
+--- /dev/null
++++ b/src/app/api/email-nfe/scan/route.ts
+@@ -0,0 +1,35 @@
++import { NextRequest, NextResponse } from "next/server";
++import { scanAllAccountsForNfe } from "@/lib/gmail-nfe";
++
++export const dynamic = "force-dynamic";
++
++// Endpoint chamado periodicamente por uma tarefa agendada externa (não tem
++// nenhum cron rodando dentro do próprio app) para varrer as caixas de
++// e-mail conectadas em busca de NF-e novas. Protegido por um token simples
++// via header ou query string — não é dado do usuário, então não precisa de
++// login de verdade, só evitar que qualquer um na internet dispare a
++// varredura à vontade.
++export async function GET(request: NextRequest) {
++  const expectedToken = process.env.GMAIL_NFE_SCAN_TOKEN;
++  if (!expectedToken) {
++    return NextResponse.json(
++      { error: "GMAIL_NFE_SCAN_TOKEN não configurado no servidor." },
++      { status: 500 }
++    );
++  }
++
++  const providedToken =
++    request.headers.get("x-scan-token") ?? request.nextUrl.searchParams.get("token");
++
++  if (providedToken !== expectedToken) {
++    return NextResponse.json({ error: "Token inválido." }, { status: 401 });
++  }
++
++  try {
++    const summary = await scanAllAccountsForNfe();
++    return NextResponse.json(summary);
++  } catch (err) {
++    const mensagem = err instanceof Error ? err.message : String(err);
++    return NextResponse.json({ error: mensagem }, { status: 500 });
++  }
++}
+diff --git a/src/app/notas-fiscais/page.tsx b/src/app/notas-fiscais/page.tsx
+new file mode 100644
+index 0000000..29f02b3
+--- /dev/null
++++ b/src/app/notas-fiscais/page.tsx
+@@ -0,0 +1,77 @@
++import { AlertTriangle, CheckCircle2, FileCheck2 } from "lucide-react";
++import { Card } from "@/components/ui/Card";
++import { listEmailAccounts, listNfePendentes } from "@/actions/nfe";
++import { listStockItemsWithStock } from "@/actions/stock";
++import { EmailAccountsPanel } from "@/components/notas-fiscais/EmailAccountsPanel";
++import { NfePendenteCard } from "@/components/notas-fiscais/NfePendenteCard";
++
++export const dynamic = "force-dynamic";
++
++const EMAIL_ERROR_MESSAGES: Record<string, string> = {
++  state_invalido: "A validação de segurança da conexão falhou. Tente conectar de novo.",
++  access_denied: "A autorização foi cancelada.",
++};
++
++export default async function NotasFiscaisPage(props: PageProps<"/notas-fiscais">) {
++  const searchParams = await props.searchParams;
++  const conectado = typeof searchParams.email_conectado === "string" ? searchParams.email_conectado : undefined;
++  const erro = typeof searchParams.email_erro === "string" ? searchParams.email_erro : undefined;
++
++  const [accounts, pendentes, stockItems] = await Promise.all([
++    listEmailAccounts(),
++    listNfePendentes(),
++    listStockItemsWithStock({ onlyActive: true }),
++  ]);
++
++  return (
++    <div className="p-4 md:p-8 max-w-3xl mx-auto animate-in">
++      <div className="mb-6">
++        <h1 className="text-2xl font-bold">Notas fiscais por e-mail</h1>
++        <p className="text-sm text-muted mt-0.5">
++          NF-e recebidas por e-mail dos fornecedores, identificadas automaticamente. Confira os itens de cada
++          nota e aprove para dar entrada de verdade no estoque.
++        </p>
++      </div>
++
++      {conectado && (
++        <div className="mb-6 flex items-center gap-2 rounded-xl bg-success-soft px-4 py-3 text-sm text-success">
++          <CheckCircle2 size={16} />
++          <span>Conta {conectado} conectada com sucesso.</span>
++        </div>
++      )}
++      {erro && (
++        <div className="mb-6 flex items-center gap-2 rounded-xl bg-danger-soft px-4 py-3 text-sm text-danger">
++          <AlertTriangle size={16} />
++          <span>{EMAIL_ERROR_MESSAGES[erro] ?? `Ocorreu um erro ao conectar: ${erro}`}</span>
++        </div>
++      )}
++
++      <div className="mb-6">
++        <EmailAccountsPanel accounts={accounts} />
++      </div>
++
++      {stockItems.length === 0 && (
++        <Card className="mb-6 text-sm text-muted">
++          Cadastre pelo menos um item em{" "}
++          <a href="/compras" className="text-brand underline">
++            Compras
++          </a>{" "}
++          antes de aprovar notas, pra poder ligar os itens da nota a um item de estoque.
++        </Card>
++      )}
++
++      {pendentes.length === 0 ? (
++        <Card className="flex flex-col items-center gap-2 py-10 text-center text-muted">
++          <FileCheck2 size={28} />
++          <p className="text-sm">Nenhuma nota fiscal aguardando conferência.</p>
++        </Card>
++      ) : (
++        <div className="space-y-3">
++          {pendentes.map((nota) => (
++            <NfePendenteCard key={nota.id} nota={nota} stockItems={stockItems} />
++          ))}
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/src/components/nav/NavLinks.tsx b/src/components/nav/NavLinks.tsx
+index 43c7665..1d45152 100755
+--- a/src/components/nav/NavLinks.tsx
++++ b/src/components/nav/NavLinks.tsx
+@@ -3,7 +3,7 @@
+ import Link from "next/link";
+ import { usePathname } from "next/navigation";
+ import { useEffect, useState } from "react";
+-import { Boxes, Inbox, LayoutDashboard, Menu, Package, ShoppingBag, ShoppingCart, Wallet, X } from "lucide-react";
++import { Boxes, FileText, Inbox, LayoutDashboard, Menu, Package, ShoppingBag, ShoppingCart, Wallet, X } from "lucide-react";
+ import { cn } from "@/lib/utils";
+ 
+ const links = [
+@@ -12,6 +12,7 @@ const links = [
+   { href: "/pendentes", label: "Pendentes", icon: Inbox },
+   { href: "/liberacoes", label: "Liberações", icon: Wallet },
+   { href: "/compras", label: "Compras", icon: ShoppingCart },
++  { href: "/notas-fiscais", label: "Notas Fiscais", icon: FileText },
+   { href: "/produtos", label: "Produtos", icon: Package },
+   { href: "/custo-fornecimento", label: "Custo Fornecimento", icon: Boxes },
+ ];
+diff --git a/src/components/notas-fiscais/EmailAccountsPanel.tsx b/src/components/notas-fiscais/EmailAccountsPanel.tsx
+new file mode 100644
+index 0000000..0893b4d
+--- /dev/null
++++ b/src/components/notas-fiscais/EmailAccountsPanel.tsx
+@@ -0,0 +1,86 @@
++"use client";
++
++import { useState, useTransition } from "react";
++import { AlertTriangle, CheckCircle2, Mail, Plus, RefreshCw } from "lucide-react";
++import { Card } from "@/components/ui/Card";
++import { Button } from "@/components/ui/Button";
++import { scanNowAction } from "@/actions/nfe";
++import { formatDate, formatTime } from "@/lib/format";
++import type { NfeEmailAccount } from "@/db/schema";
++
++export function EmailAccountsPanel({ accounts }: { accounts: NfeEmailAccount[] }) {
++  const [scanning, startScanTransition] = useTransition();
++  const [scanMessage, setScanMessage] = useState<string | null>(null);
++
++  return (
++    <Card className="space-y-3">
++      <div className="flex items-center justify-between gap-2">
++        <div className="flex items-center gap-2">
++          <Mail size={16} className="text-muted" />
++          <h2 className="font-semibold">Caixas de e-mail conectadas</h2>
++        </div>
++        <div className="flex items-center gap-2">
++          <Button
++            type="button"
++            variant="ghost"
++            size="sm"
++            disabled={scanning}
++            onClick={() =>
++              startScanTransition(async () => {
++                const result = await scanNowAction();
++                setScanMessage(result.message);
++              })
++            }
++          >
++            <RefreshCw size={14} className={scanning ? "animate-spin" : ""} />
++            Verificar e-mails agora
++          </Button>
++          <a href="/api/email-nfe/authorize">
++            <Button type="button" variant="outline" size="sm">
++              <Plus size={14} />
++              Conectar conta
++            </Button>
++          </a>
++        </div>
++      </div>
++
++      {scanMessage && <p className="text-xs text-muted">{scanMessage}</p>}
++
++      {accounts.length === 0 ? (
++        <p className="text-sm text-muted">
++          Nenhuma conta conectada ainda. Clique em &quot;Conectar conta&quot; e faça login com o
++          Gmail que recebe as notas dos fornecedores.
++        </p>
++      ) : (
++        <div className="space-y-2">
++          {accounts.map((account) => (
++            <div
++              key={account.id}
++              className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface-muted/40 px-3 py-2"
++            >
++              <div className="min-w-0">
++                <p className="text-sm font-medium truncate">{account.email}</p>
++                <p className="text-xs text-muted">
++                  {account.lastScannedAt
++                    ? `Última varredura: ${formatDate(account.lastScannedAt)} às ${formatTime(account.lastScannedAt)}`
++                    : "Ainda não varrida"}
++                </p>
++              </div>
++              {account.lastScanError ? (
++                <span className="flex items-center gap-1 text-xs text-danger shrink-0" title={account.lastScanError}>
++                  <AlertTriangle size={13} />
++                  Erro na varredura
++                </span>
++              ) : (
++                <span className="flex items-center gap-1 text-xs text-success shrink-0">
++                  <CheckCircle2 size={13} />
++                  OK
++                </span>
++              )}
++            </div>
++          ))}
++        </div>
++      )}
++    </Card>
++  );
++}
+diff --git a/src/components/notas-fiscais/NfePendenteCard.tsx b/src/components/notas-fiscais/NfePendenteCard.tsx
+new file mode 100644
+index 0000000..98efc7b
+--- /dev/null
++++ b/src/components/notas-fiscais/NfePendenteCard.tsx
+@@ -0,0 +1,161 @@
++"use client";
++
++import { useActionState, useTransition } from "react";
++import { useFormStatus } from "react-dom";
++import { AlertTriangle, CheckCheck, Loader2, X } from "lucide-react";
++import { Card } from "@/components/ui/Card";
++import { Button } from "@/components/ui/Button";
++import { Input, Label, Select } from "@/components/ui/Field";
++import { approveNfePendente, rejectNfePendente } from "@/actions/nfe";
++import type { StockItemRow } from "@/actions/stock";
++import { formatCurrency, formatDate } from "@/lib/format";
++import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type NfeItemParsed, type NfePendente } from "@/db/schema";
++import type { ActionResult } from "@/actions/products";
++
++export function NfePendenteCard({
++  nota,
++  stockItems,
++}: {
++  nota: NfePendente;
++  stockItems: StockItemRow[];
++}) {
++  const approveAction = approveNfePendente.bind(null, nota.id);
++  const [state, formAction] = useActionState<ActionResult | null, FormData>(approveAction, null);
++  const errors = state && !state.ok ? state.errors : {};
++  const [rejecting, startRejectTransition] = useTransition();
++
++  const itens = (nota.itens as NfeItemParsed[]) ?? [];
++  const valorTotal = Number(nota.valorTotal);
++
++  if (nota.erro) {
++    return (
++      <Card className="space-y-2 border-danger/30">
++        <div className="flex items-start gap-2">
++          <AlertTriangle size={16} className="text-danger shrink-0 mt-0.5" />
++          <div className="min-w-0">
++            <p className="font-semibold text-sm">Não deu para ler esse e-mail como NF-e</p>
++            <p className="text-xs text-muted mt-0.5">{nota.erro}</p>
++          </div>
++        </div>
++        <Button
++          type="button"
++          variant="ghost"
++          size="sm"
++          disabled={rejecting}
++          onClick={() => startRejectTransition(() => rejectNfePendente(nota.id))}
++        >
++          {rejecting ? <Loader2 size={14} className="animate-spin" /> : <X size={14} />}
++          Descartar
++        </Button>
++      </Card>
++    );
++  }
++
++  return (
++    <Card className="space-y-3">
++      <div className="flex items-start justify-between gap-3">
++        <div className="min-w-0">
++          <p className="font-semibold text-sm truncate">{nota.fornecedorNome}</p>
++          <p className="text-xs text-muted mt-0.5">
++            {nota.numeroNota ? `NF-e nº ${nota.numeroNota}` : "Número não identificado"}
++            {nota.serieNota ? ` · série ${nota.serieNota}` : ""}
++            {nota.dataEmissao ? ` · emitida em ${formatDate(new Date(`${nota.dataEmissao}T00:00:00`))}` : ""}
++          </p>
++          {nota.fornecedorCnpj && (
++            <p className="text-xs text-muted mt-0.5">CNPJ: {nota.fornecedorCnpj}</p>
++          )}
++        </div>
++        <span className="shrink-0 rounded-full bg-accent-soft px-2.5 py-0.5 text-xs font-semibold text-accent whitespace-nowrap">
++          {formatCurrency(valorTotal)}
++        </span>
++      </div>
++
++      <form action={formAction} className="space-y-3 border-t border-border pt-3">
++        <div className="space-y-2">
++          <Label hint="escolha o item do estoque de cada linha, ou deixe em branco pra ignorar">
++            Itens da nota
++          </Label>
++          <div className="space-y-2">
++            {itens.map((item, index) => (
++              <div
++                key={index}
++                className="rounded-xl border border-border bg-surface-muted/40 p-2.5 space-y-1.5"
++              >
++                <p className="text-xs font-medium">{item.descricao}</p>
++                <p className="text-xs text-muted">
++                  {item.quantidade}x {formatCurrency(item.valorUnitario)} = {formatCurrency(item.valorTotal)}
++                  {item.ean ? ` · EAN ${item.ean}` : ""} · cód. fornecedor {item.codigoFornecedor}
++                </p>
++                <Select name={`item_${index}_stockItemId`} defaultValue="">
++                  <option value="">Ignorar esse item</option>
++                  {stockItems.map((stockItem) => (
++                    <option key={stockItem.id} value={stockItem.id}>
++                      #{stockItem.internalCode} {stockItem.name} (estoque atual: {stockItem.currentStock})
++                    </option>
++                  ))}
++                </Select>
++              </div>
++            ))}
++          </div>
++        </div>
++
++        <div className="grid grid-cols-2 gap-3">
++          <div>
++            <Label>Data da compra</Label>
++            <Input
++              type="date"
++              name="purchaseDate"
++              defaultValue={nota.dataEmissao ?? ""}
++              error={errors.purchaseDate}
++              required
++            />
++          </div>
++          <div>
++            <Label>Forma de pagamento</Label>
++            <Select
++              name="paymentMethod"
++              defaultValue={nota.formaPagamentoSugerida ?? ""}
++              error={errors.paymentMethod}
++              required
++            >
++              <option value="" disabled>
++                Selecione...
++              </option>
++              {PAYMENT_METHODS.map((method) => (
++                <option key={method} value={method}>
++                  {PAYMENT_METHOD_LABELS[method]}
++                </option>
++              ))}
++            </Select>
++          </div>
++        </div>
++
++        {errors.form && <p className="text-sm text-danger">{errors.form}</p>}
++
++        <div className="flex items-center gap-2 pt-1">
++          <ApproveButton />
++          <Button
++            type="button"
++            variant="ghost"
++            size="md"
++            disabled={rejecting}
++            onClick={() => startRejectTransition(() => rejectNfePendente(nota.id))}
++          >
++            {rejecting ? <Loader2 size={16} className="animate-spin" /> : <X size={16} />}
++            Rejeitar
++          </Button>
++        </div>
++      </form>
++    </Card>
++  );
++}
++
++function ApproveButton() {
++  const { pending } = useFormStatus();
++  return (
++    <Button type="submit" variant="secondary" size="md" disabled={pending}>
++      {pending ? <Loader2 size={16} className="animate-spin" /> : <CheckCheck size={16} />}
++      Aprovar e dar entrada no estoque
++    </Button>
++  );
++}
+diff --git a/src/db/schema.ts b/src/db/schema.ts
+index 7643c89..100f805 100755
+--- a/src/db/schema.ts
++++ b/src/db/schema.ts
+@@ -499,6 +499,88 @@ export const pendingSales = pgTable(
+   ]
+ );
+ 
++// Conta de e-mail (Gmail) conectada para varredura automática de NF-e de
++// fornecedores. Cada conta guarda seu próprio par de tokens OAuth — permite
++// conectar as contas do Juan, do Djow e de mais e-mails no futuro, cada uma
++// varrida de forma independente.
++export const nfeEmailAccounts = pgTable("nfe_email_accounts", {
++  id: uuid("id").primaryKey().defaultRandom(),
++  email: text("email").notNull().unique(),
++  accessToken: text("access_token").notNull(),
++  refreshToken: text("refresh_token").notNull(),
++  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
++  scope: text("scope"),
++  // Guarda quando essa caixa foi varrida com sucesso pela última vez, só
++  // para exibir na tela — a dedução de "e-mail novo" na varredura é sempre
++  // feita pelo gmailMessageId já visto (tabela nfe_pendentes), não por data,
++  // pra nunca perder um e-mail por causa de relógio/fuso.
++  lastScannedAt: timestamp("last_scanned_at", { withTimezone: true }),
++  lastScanError: text("last_scan_error"),
++  createdAt: timestamp("created_at", { withTimezone: true })
++    .notNull()
++    .defaultNow(),
++  updatedAt: timestamp("updated_at", { withTimezone: true })
++    .notNull()
++    .defaultNow(),
++});
++
++// Status de uma NF-e recebida por e-mail, aguardando (ou já passada por)
++// conferência manual antes de virar compra de estoque de verdade.
++export const NFE_PENDENTE_STATUSES = ["pendente", "aprovada", "rejeitada"] as const;
++export type NfePendenteStatus = (typeof NFE_PENDENTE_STATUSES)[number];
++
++// Um item de linha da NF-e, como veio do XML — ainda não ligado a nenhum
++// item do estoque (isso só acontece na hora da aprovação manual).
++export interface NfeItemParsed {
++  codigoFornecedor: string;
++  ean: string | null;
++  descricao: string;
++  quantidade: number;
++  valorUnitario: number;
++  valorTotal: number;
++}
++
++// Uma NF-e (nota fiscal eletrônica) identificada num e-mail de fornecedor,
++// com o XML já lido e estruturado — mas só é usada para dar baixa em compra
++// de estoque de verdade depois que alguém confere e aprova em
++// /notas-fiscais (mesmo espírito de /pendentes: nunca mexe em dado real
++// sozinha).
++export const nfePendentes = pgTable(
++  "nfe_pendentes",
++  {
++    id: uuid("id").primaryKey().defaultRandom(),
++    emailAccountId: uuid("email_account_id")
++      .notNull()
++      .references(() => nfeEmailAccounts.id, { onDelete: "cascade" }),
++    // Evita processar o mesmo e-mail duas vezes entre varreduras.
++    gmailMessageId: text("gmail_message_id").notNull().unique(),
++    fornecedorCnpj: text("fornecedor_cnpj"),
++    fornecedorNome: text("fornecedor_nome").notNull(),
++    numeroNota: text("numero_nota"),
++    serieNota: text("serie_nota"),
++    dataEmissao: date("data_emissao"),
++    valorTotal: numeric("valor_total", { precision: 12, scale: 2 }).notNull(),
++    // Palpite de forma de pagamento a partir do campo <tPag> da NF-e — só
++    // pré-preenche o formulário de aprovação, o usuário pode trocar.
++    formaPagamentoSugerida: text("forma_pagamento_sugerida", {
++      enum: PAYMENT_METHODS,
++    }),
++    itens: jsonb("itens").$type<NfeItemParsed[]>().notNull(),
++    status: text("status", { enum: NFE_PENDENTE_STATUSES })
++      .notNull()
++      .default("pendente"),
++    // Se o XML não é uma NF-e reconhecível ou algum item não deu pra ler
++    // direito, guardamos o motivo aqui pra mostrar na tela em vez de
++    // simplesmente sumir com o e-mail.
++    erro: text("erro"),
++    recebidaEm: timestamp("recebida_em", { withTimezone: true })
++      .notNull()
++      .defaultNow(),
++    processadaEm: timestamp("processada_em", { withTimezone: true }),
++  },
++  (table) => [index("nfe_pendentes_status_idx").on(table.status)]
++);
++
+ export type Product = typeof products.$inferSelect;
+ export type NewProduct = typeof products.$inferInsert;
+ export type Sale = typeof sales.$inferSelect;
+@@ -508,3 +590,5 @@ export type AppSettings = typeof settings.$inferSelect;
+ export type MercadolivreCredentials = typeof mercadolivreCredentials.$inferSelect;
+ export type PendingSale = typeof pendingSales.$inferSelect;
+ export type NewPendingSale = typeof pendingSales.$inferInsert;
++export type NfeEmailAccount = typeof nfeEmailAccounts.$inferSelect;
++export type NfePendente = typeof nfePendentes.$inferSelect;
+diff --git a/src/lib/gmail-nfe.ts b/src/lib/gmail-nfe.ts
+new file mode 100644
+index 0000000..73845ae
+--- /dev/null
++++ b/src/lib/gmail-nfe.ts
+@@ -0,0 +1,466 @@
++import { XMLParser } from "fast-xml-parser";
++import { eq } from "drizzle-orm";
++import { db } from "@/db";
++import {
++  nfeEmailAccounts,
++  nfePendentes,
++  PAYMENT_METHODS,
++  type NfeItemParsed,
++  type PaymentMethod,
++} from "@/db/schema";
++
++const GOOGLE_AUTH_BASE = "https://accounts.google.com/o/oauth2/v2/auth";
++const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
++const GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1";
++
++// Só leitura — o app nunca apaga, marca como lido/spam ou responde nada.
++const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
++
++// Mesma lógica do Mercado Livre: URL pública fixa, resolvida a partir da
++// variável de ambiente, nunca do host da requisição (atrás do proxy do
++// Railway request.url pode vir como "localhost:8080").
++export const GMAIL_NFE_REDIRECT_URI =
++  process.env.GMAIL_NFE_REDIRECT_URI ??
++  "https://web2-production-22bd.up.railway.app/api/email-nfe/callback";
++
++export const SITE_ORIGIN = new URL(GMAIL_NFE_REDIRECT_URI).origin;
++
++function getClientCredentials() {
++  const clientId = process.env.GMAIL_NFE_CLIENT_ID;
++  const clientSecret = process.env.GMAIL_NFE_CLIENT_SECRET;
++  if (!clientId || !clientSecret) {
++    throw new Error("GMAIL_NFE_CLIENT_ID / GMAIL_NFE_CLIENT_SECRET não configurados.");
++  }
++  return { clientId, clientSecret };
++}
++
++/**
++ * Monta a URL de autorização do Google para a qual o usuário precisa ser
++ * redirecionado para conectar mais uma caixa de e-mail. `prompt=consent` +
++ * `access_type=offline` garantem que a gente sempre recebe um
++ * refresh_token, mesmo se essa conta já tiver autorizado o app antes.
++ */
++export function buildAuthorizationUrl(state: string): string {
++  const { clientId } = getClientCredentials();
++  const url = new URL(GOOGLE_AUTH_BASE);
++  url.searchParams.set("client_id", clientId);
++  url.searchParams.set("redirect_uri", GMAIL_NFE_REDIRECT_URI);
++  url.searchParams.set("response_type", "code");
++  url.searchParams.set("scope", GMAIL_SCOPE);
++  url.searchParams.set("access_type", "offline");
++  url.searchParams.set("prompt", "consent");
++  url.searchParams.set("state", state);
++  return url.toString();
++}
++
++interface GoogleTokenResponse {
++  access_token: string;
++  expires_in: number;
++  scope: string;
++  token_type: string;
++  refresh_token?: string;
++}
++
++/**
++ * Troca o código de autorização (recebido no callback OAuth) pelos tokens,
++ * descobre o e-mail da conta conectada e salva/atualiza a linha em
++ * nfe_email_accounts.
++ */
++export async function connectEmailAccountFromCode(code: string): Promise<string> {
++  const { clientId, clientSecret } = getClientCredentials();
++
++  const response = await fetch(GOOGLE_TOKEN_URL, {
++    method: "POST",
++    headers: {
++      "Content-Type": "application/x-www-form-urlencoded",
++      Accept: "application/json",
++    },
++    body: new URLSearchParams({
++      grant_type: "authorization_code",
++      client_id: clientId,
++      client_secret: clientSecret,
++      code,
++      redirect_uri: GMAIL_NFE_REDIRECT_URI,
++    }),
++  });
++
++  if (!response.ok) {
++    const text = await response.text().catch(() => "");
++    throw new Error(`Falha ao trocar código por token (${response.status}): ${text}`);
++  }
++
++  const token = (await response.json()) as GoogleTokenResponse;
++  if (!token.refresh_token) {
++    // Acontece se a conta já tinha autorizado antes e o Google decidiu não
++    // reemitir um refresh_token mesmo com prompt=consent — sem ele não dá
++    // pra varrer a caixa sem pedir login de novo a cada poucos minutos.
++    throw new Error(
++      "O Google não retornou um refresh_token. Revogue o acesso anterior em " +
++        "myaccount.google.com/permissions e tente conectar de novo."
++    );
++  }
++
++  const email = await getProfileEmail(token.access_token);
++  const expiresAt = new Date(Date.now() + token.expires_in * 1000);
++
++  await db
++    .insert(nfeEmailAccounts)
++    .values({
++      email,
++      accessToken: token.access_token,
++      refreshToken: token.refresh_token,
++      expiresAt,
++      scope: token.scope,
++    })
++    .onConflictDoUpdate({
++      target: nfeEmailAccounts.email,
++      set: {
++        accessToken: token.access_token,
++        refreshToken: token.refresh_token,
++        expiresAt,
++        scope: token.scope,
++        lastScanError: null,
++        updatedAt: new Date(),
++      },
++    });
++
++  return email;
++}
++
++async function refreshAccessToken(refreshToken: string): Promise<GoogleTokenResponse> {
++  const { clientId, clientSecret } = getClientCredentials();
++
++  const response = await fetch(GOOGLE_TOKEN_URL, {
++    method: "POST",
++    headers: {
++      "Content-Type": "application/x-www-form-urlencoded",
++      Accept: "application/json",
++    },
++    body: new URLSearchParams({
++      grant_type: "refresh_token",
++      client_id: clientId,
++      client_secret: clientSecret,
++      refresh_token: refreshToken,
++    }),
++  });
++
++  if (!response.ok) {
++    const text = await response.text().catch(() => "");
++    throw new Error(`Falha ao renovar token (${response.status}): ${text}`);
++  }
++
++  return (await response.json()) as GoogleTokenResponse;
++}
++
++async function getProfileEmail(accessToken: string): Promise<string> {
++  const response = await fetch(`${GMAIL_API_BASE}/users/me/profile`, {
++    headers: { Authorization: `Bearer ${accessToken}` },
++  });
++  if (!response.ok) {
++    throw new Error(`Falha ao identificar a conta conectada (${response.status}).`);
++  }
++  const data = (await response.json()) as { emailAddress: string };
++  return data.emailAddress;
++}
++
++/**
++ * Garante um access_token válido para a conta (renovando se estiver perto
++ * de expirar), já persistindo a renovação no banco.
++ */
++async function ensureValidAccessToken(
++  account: typeof nfeEmailAccounts.$inferSelect
++): Promise<string> {
++  const expiresInMs = account.expiresAt.getTime() - Date.now();
++  if (expiresInMs > 60_000) {
++    return account.accessToken;
++  }
++
++  const token = await refreshAccessToken(account.refreshToken);
++  const expiresAt = new Date(Date.now() + token.expires_in * 1000);
++  await db
++    .update(nfeEmailAccounts)
++    .set({
++      accessToken: token.access_token,
++      expiresAt,
++      // O Google normalmente não reemite refresh_token nesse fluxo — só
++      // sobrescreve se vier um novo.
++      ...(token.refresh_token ? { refreshToken: token.refresh_token } : {}),
++      updatedAt: new Date(),
++    })
++    .where(eq(nfeEmailAccounts.id, account.id));
++
++  return token.access_token;
++}
++
++interface GmailMessagePart {
++  filename?: string;
++  mimeType?: string;
++  body?: { attachmentId?: string; data?: string; size?: number };
++  parts?: GmailMessagePart[];
++}
++
++interface GmailMessage {
++  id: string;
++  payload?: GmailMessagePart;
++}
++
++function findXmlParts(part: GmailMessagePart | undefined, out: GmailMessagePart[] = []) {
++  if (!part) return out;
++  if (part.filename && part.filename.toLowerCase().endsWith(".xml") && part.body?.attachmentId) {
++    out.push(part);
++  }
++  for (const child of part.parts ?? []) {
++    findXmlParts(child, out);
++  }
++  return out;
++}
++
++async function fetchAttachmentBase64(
++  accessToken: string,
++  messageId: string,
++  attachmentId: string
++): Promise<string> {
++  const response = await fetch(
++    `${GMAIL_API_BASE}/users/me/messages/${messageId}/attachments/${attachmentId}`,
++    { headers: { Authorization: `Bearer ${accessToken}` } }
++  );
++  if (!response.ok) {
++    throw new Error(`Falha ao baixar anexo (${response.status}).`);
++  }
++  const data = (await response.json()) as { data: string };
++  // Gmail usa base64url (- e _ em vez de + e /).
++  return data.data.replace(/-/g, "+").replace(/_/g, "/");
++}
++
++// Mapa aproximado do código <tPag> da NF-e (tabela oficial da SEFAZ) para a
++// forma de pagamento do app — só uma sugestão pré-preenchida, o usuário
++// confirma/troca na hora de aprovar.
++const TPAG_TO_PAYMENT_METHOD: Record<string, PaymentMethod> = {
++  "01": "dinheiro",
++  "03": "cartao_credito",
++  "04": "cartao_debito",
++  "15": "boleto",
++  "17": "pix",
++  "18": "transferencia",
++};
++
++interface ParsedNfe {
++  fornecedorCnpj: string | null;
++  fornecedorNome: string;
++  numeroNota: string | null;
++  serieNota: string | null;
++  dataEmissao: string | null;
++  valorTotal: number;
++  formaPagamentoSugerida: PaymentMethod | null;
++  itens: NfeItemParsed[];
++}
++
++// parseTagValue:false é de propósito — a conversão automática do parser
++// pra number derruba zeros à esquerda (ex: tPag "03" virava 3, o que
++// quebrava o mapeamento de forma de pagamento). Os campos que a gente quer
++// como número mesmo (qCom, vUnCom, vProd, vNF) já passam por toNumber() na
++// leitura abaixo.
++const xmlParser = new XMLParser({
++  ignoreAttributes: false,
++  attributeNamePrefix: "@_",
++  parseTagValue: false,
++});
++
++function asArray<T>(value: T | T[] | undefined): T[] {
++  if (value === undefined) return [];
++  return Array.isArray(value) ? value : [value];
++}
++
++function toNumber(value: unknown): number {
++  const n = Number(value);
++  return Number.isFinite(n) ? n : 0;
++}
++
++/**
++ * Extrai os dados relevantes de uma NF-e (formato `nfeProc`/`NFe` padrão da
++ * SEFAZ, versão 4.00) a partir do XML bruto. Não valida assinatura nem
++ * autenticidade — isso já foi feito pela SEFAZ antes de a nota existir;
++ * aqui só lemos os dados para virar uma pendência de conferência.
++ */
++export function parseNfeXml(xml: string): ParsedNfe {
++  const parsed = xmlParser.parse(xml);
++  // O XML pode vir como <nfeProc><NFe><infNFe>...</infNFe></NFe></nfeProc>
++  // (o mais comum, anexado por e-mail) ou já como <NFe><infNFe>...</infNFe>
++  // </NFe> solto — aceitamos os dois formatos.
++  const nfe = parsed.nfeProc?.NFe ?? parsed.NFe;
++  const infNFe = nfe?.infNFe;
++  if (!infNFe) {
++    throw new Error("XML não parece ser uma NF-e (elemento infNFe não encontrado).");
++  }
++
++  const ide = infNFe.ide ?? {};
++  const emit = infNFe.emit ?? {};
++  const total = infNFe.total?.ICMSTot ?? {};
++  const dets = asArray(infNFe.det);
++
++  const itens: NfeItemParsed[] = dets.map((det) => {
++    const prod = det.prod ?? {};
++    const quantidade = toNumber(prod.qCom);
++    const valorUnitario = toNumber(prod.vUnCom);
++    const valorTotal = prod.vProd !== undefined ? toNumber(prod.vProd) : quantidade * valorUnitario;
++    return {
++      codigoFornecedor: String(prod.cProd ?? ""),
++      ean: prod.cEAN && prod.cEAN !== "SEM GTIN" ? String(prod.cEAN) : null,
++      descricao: String(prod.xProd ?? "Item sem descrição"),
++      quantidade,
++      valorUnitario,
++      valorTotal,
++    };
++  });
++
++  // <pag> pode ter um ou mais <detPag> — usamos o primeiro só para sugerir
++  // a forma de pagamento do formulário.
++  const detPag = asArray(infNFe.pag?.detPag)[0];
++  const tPag = detPag?.tPag !== undefined ? String(detPag.tPag) : undefined;
++
++  // dhEmi vem como "2026-09-16T22:23:46-03:00" — pegamos só a parte da data.
++  const dhEmi = typeof ide.dhEmi === "string" ? ide.dhEmi : null;
++
++  return {
++    fornecedorCnpj: emit.CNPJ ? String(emit.CNPJ) : null,
++    fornecedorNome: String(emit.xNome ?? "Fornecedor não identificado"),
++    numeroNota: ide.nNF !== undefined ? String(ide.nNF) : null,
++    serieNota: ide.serie !== undefined ? String(ide.serie) : null,
++    dataEmissao: dhEmi ? dhEmi.slice(0, 10) : null,
++    valorTotal: toNumber(total.vNF),
++    formaPagamentoSugerida: tPag ? TPAG_TO_PAYMENT_METHOD[tPag] ?? null : null,
++    itens,
++  };
++}
++
++export interface ScanSummary {
++  contasVarridas: number;
++  novasPendencias: number;
++  erros: { email: string; mensagem: string }[];
++}
++
++/**
++ * Varre todas as contas de e-mail conectadas em busca de NF-e novas
++ * (mensagens com anexo .xml ainda não vistas) e cria uma pendência em
++ * /notas-fiscais para cada uma. Nunca toca em estoque/compras — só isso,
++ * que é feito manualmente na aprovação.
++ */
++export async function scanAllAccountsForNfe(): Promise<ScanSummary> {
++  const accounts = await db.select().from(nfeEmailAccounts);
++  const summary: ScanSummary = { contasVarridas: 0, novasPendencias: 0, erros: [] };
++
++  for (const account of accounts) {
++    try {
++      const novas = await scanAccountForNfe(account);
++      summary.contasVarridas += 1;
++      summary.novasPendencias += novas;
++      await db
++        .update(nfeEmailAccounts)
++        .set({ lastScannedAt: new Date(), lastScanError: null })
++        .where(eq(nfeEmailAccounts.id, account.id));
++    } catch (err) {
++      const mensagem = err instanceof Error ? err.message : String(err);
++      summary.erros.push({ email: account.email, mensagem });
++      await db
++        .update(nfeEmailAccounts)
++        .set({ lastScanError: mensagem })
++        .where(eq(nfeEmailAccounts.id, account.id));
++    }
++  }
++
++  return summary;
++}
++
++async function scanAccountForNfe(
++  account: typeof nfeEmailAccounts.$inferSelect
++): Promise<number> {
++  const accessToken = await ensureValidAccessToken(account);
++
++  // Últimos 30 dias é uma folga generosa (varredura roda com frequência) —
++  // o que evita reprocessar é sempre o gmailMessageId já salvo, não a
++  // janela de tempo.
++  const query = encodeURIComponent("has:attachment filename:xml newer_than:30d");
++  const listResponse = await fetch(
++    `${GMAIL_API_BASE}/users/me/messages?q=${query}&maxResults=25`,
++    { headers: { Authorization: `Bearer ${accessToken}` } }
++  );
++  if (!listResponse.ok) {
++    throw new Error(`Falha ao listar mensagens (${listResponse.status}).`);
++  }
++  const list = (await listResponse.json()) as { messages?: { id: string }[] };
++  const messageIds = (list.messages ?? []).map((m) => m.id);
++  if (messageIds.length === 0) return 0;
++
++  const existentes = await db
++    .select({ gmailMessageId: nfePendentes.gmailMessageId })
++    .from(nfePendentes)
++    .where(eq(nfePendentes.emailAccountId, account.id));
++  const jaVistos = new Set(existentes.map((e) => e.gmailMessageId));
++
++  let novas = 0;
++  for (const messageId of messageIds) {
++    if (jaVistos.has(messageId)) continue;
++
++    const messageResponse = await fetch(
++      `${GMAIL_API_BASE}/users/me/messages/${messageId}?format=full`,
++      { headers: { Authorization: `Bearer ${accessToken}` } }
++    );
++    if (!messageResponse.ok) continue;
++    const message = (await messageResponse.json()) as GmailMessage;
++
++    const xmlParts = findXmlParts(message.payload);
++    if (xmlParts.length === 0) continue;
++
++    for (const part of xmlParts) {
++      try {
++        const base64 = await fetchAttachmentBase64(
++          accessToken,
++          messageId,
++          part.body!.attachmentId!
++        );
++        const xml = Buffer.from(base64, "base64").toString("utf-8");
++        const parsedNfe = parseNfeXml(xml);
++
++        await db.insert(nfePendentes).values({
++          emailAccountId: account.id,
++          gmailMessageId: messageId,
++          fornecedorCnpj: parsedNfe.fornecedorCnpj,
++          fornecedorNome: parsedNfe.fornecedorNome,
++          numeroNota: parsedNfe.numeroNota,
++          serieNota: parsedNfe.serieNota,
++          dataEmissao: parsedNfe.dataEmissao,
++          valorTotal: String(parsedNfe.valorTotal),
++          formaPagamentoSugerida: parsedNfe.formaPagamentoSugerida,
++          itens: parsedNfe.itens,
++        });
++        novas += 1;
++        // Um e-mail pode trazer mais de uma NF-e anexada (raro, mas
++        // acontece com XML + outro XML) — cada .xml vira uma pendência
++        // própria; se isso repetir pro mesmo messageId, o unique de
++        // gmailMessageId no schema bloquearia, então só a primeira conta.
++        break;
++      } catch (err) {
++        // XML anexado que não é uma NF-e válida (ex: um boleto em XML,
++        // ou nota malformada) — registra como pendência com erro em vez de
++        // travar a varredura inteira ou perder o e-mail silenciosamente.
++        const mensagem = err instanceof Error ? err.message : String(err);
++        await db
++          .insert(nfePendentes)
++          .values({
++            emailAccountId: account.id,
++            gmailMessageId: messageId,
++            fornecedorNome: "Não identificado",
++            valorTotal: "0",
++            itens: [],
++            erro: mensagem,
++          })
++          .onConflictDoNothing();
++        novas += 1;
++      }
++    }
++  }
++
++  return novas;
++}
++
++export { PAYMENT_METHODS };
+diff --git a/src/lib/validations.ts b/src/lib/validations.ts
+index 6ab2740..f8ded9d 100755
+--- a/src/lib/validations.ts
++++ b/src/lib/validations.ts
+@@ -65,6 +65,15 @@ export const stockItemSchema = z.object({
+   minStock: z.coerce.number().int().min(0, "Não pode ser negativo"),
+ });
+ 
++// Aprovação de uma NF-e recebida por e-mail (aba Notas Fiscais): a data e a
++// forma de pagamento valem pra nota inteira; qual item de estoque cada
++// linha do XML vira (ou se é ignorada) é lido à parte do FormData, já que a
++// quantidade de itens varia por nota.
++export const approveNfeSchema = z.object({
++  purchaseDate: z.string().min(1, "Informe a data da compra"),
++  paymentMethod: z.enum(PAYMENT_METHODS, { message: "Selecione a forma de pagamento" }),
++});
++
+ // Registro de uma compra de mercadoria (aba Compras) — sempre por unidade.
+ export const stockPurchaseSchema = z.object({
+   stockItemId: z.string().uuid("Selecione o item comprado"),
+-- 
+2.43.0
+

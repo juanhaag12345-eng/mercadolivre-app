@@ -99,6 +99,13 @@
       "when": 1789607601766,
       "tag": "0013_estoque_compras",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1789668889710,
+      "tag": "0014_nfe_email_automation",
+      "breakpoints": true
     }
   ]
 }

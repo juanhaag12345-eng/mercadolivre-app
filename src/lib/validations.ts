@@ -65,6 +65,15 @@ export const stockItemSchema = z.object({
   minStock: z.coerce.number().int().min(0, "Não pode ser negativo"),
 });
 
+// Aprovação de uma NF-e recebida por e-mail (aba Notas Fiscais): a data e a
+// forma de pagamento valem pra nota inteira; qual item de estoque cada
+// linha do XML vira (ou se é ignorada) é lido à parte do FormData, já que a
+// quantidade de itens varia por nota.
+export const approveNfeSchema = z.object({
+  purchaseDate: z.string().min(1, "Informe a data da compra"),
+  paymentMethod: z.enum(PAYMENT_METHODS, { message: "Selecione a forma de pagamento" }),
+});
+
 // Registro de uma compra de mercadoria (aba Compras) — sempre por unidade.
 export const stockPurchaseSchema = z.object({
   stockItemId: z.string().uuid("Selecione o item comprado"),

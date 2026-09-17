@@ -499,6 +499,88 @@ export const pendingSales = pgTable(
   ]
 );
 
+// Conta de e-mail (Gmail) conectada para varredura automática de NF-e de
+// fornecedores. Cada conta guarda seu próprio par de tokens OAuth — permite
+// conectar as contas do Juan, do Djow e de mais e-mails no futuro, cada uma
+// varrida de forma independente.
+export const nfeEmailAccounts = pgTable("nfe_email_accounts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  email: text("email").notNull().unique(),
+  accessToken: text("access_token").notNull(),
+  refreshToken: text("refresh_token").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  scope: text("scope"),
+  // Guarda quando essa caixa foi varrida com sucesso pela última vez, só
+  // para exibir na tela — a dedução de "e-mail novo" na varredura é sempre
+  // feita pelo gmailMessageId já visto (tabela nfe_pendentes), não por data,
+  // pra nunca perder um e-mail por causa de relógio/fuso.
+  lastScannedAt: timestamp("last_scanned_at", { withTimezone: true }),
+  lastScanError: text("last_scan_error"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+// Status de uma NF-e recebida por e-mail, aguardando (ou já passada por)
+// conferência manual antes de virar compra de estoque de verdade.
+export const NFE_PENDENTE_STATUSES = ["pendente", "aprovada", "rejeitada"] as const;
+export type NfePendenteStatus = (typeof NFE_PENDENTE_STATUSES)[number];
+
+// Um item de linha da NF-e, como veio do XML — ainda não ligado a nenhum
+// item do estoque (isso só acontece na hora da aprovação manual).
+export interface NfeItemParsed {
+  codigoFornecedor: string;
+  ean: string | null;
+  descricao: string;
+  quantidade: number;
+  valorUnitario: number;
+  valorTotal: number;
+}
+
+// Uma NF-e (nota fiscal eletrônica) identificada num e-mail de fornecedor,
+// com o XML já lido e estruturado — mas só é usada para dar baixa em compra
+// de estoque de verdade depois que alguém confere e aprova em
+// /notas-fiscais (mesmo espírito de /pendentes: nunca mexe em dado real
+// sozinha).
+export const nfePendentes = pgTable(
+  "nfe_pendentes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    emailAccountId: uuid("email_account_id")
+      .notNull()
+      .references(() => nfeEmailAccounts.id, { onDelete: "cascade" }),
+    // Evita processar o mesmo e-mail duas vezes entre varreduras.
+    gmailMessageId: text("gmail_message_id").notNull().unique(),
+    fornecedorCnpj: text("fornecedor_cnpj"),
+    fornecedorNome: text("fornecedor_nome").notNull(),
+    numeroNota: text("numero_nota"),
+    serieNota: text("serie_nota"),
+    dataEmissao: date("data_emissao"),
+    valorTotal: numeric("valor_total", { precision: 12, scale: 2 }).notNull(),
+    // Palpite de forma de pagamento a partir do campo <tPag> da NF-e — só
+    // pré-preenche o formulário de aprovação, o usuário pode trocar.
+    formaPagamentoSugerida: text("forma_pagamento_sugerida", {
+      enum: PAYMENT_METHODS,
+    }),
+    itens: jsonb("itens").$type<NfeItemParsed[]>().notNull(),
+    status: text("status", { enum: NFE_PENDENTE_STATUSES })
+      .notNull()
+      .default("pendente"),
+    // Se o XML não é uma NF-e reconhecível ou algum item não deu pra ler
+    // direito, guardamos o motivo aqui pra mostrar na tela em vez de
+    // simplesmente sumir com o e-mail.
+    erro: text("erro"),
+    recebidaEm: timestamp("recebida_em", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    processadaEm: timestamp("processada_em", { withTimezone: true }),
+  },
+  (table) => [index("nfe_pendentes_status_idx").on(table.status)]
+);
+
 export type Product = typeof products.$inferSelect;
 export type NewProduct = typeof products.$inferInsert;
 export type Sale = typeof sales.$inferSelect;
@@ -508,3 +590,5 @@ export type AppSettings = typeof settings.$inferSelect;
 export type MercadolivreCredentials = typeof mercadolivreCredentials.$inferSelect;
 export type PendingSale = typeof pendingSales.$inferSelect;
 export type NewPendingSale = typeof pendingSales.$inferInsert;
+export type NfeEmailAccount = typeof nfeEmailAccounts.$inferSelect;
+export type NfePendente = typeof nfePendentes.$inferSelect;
