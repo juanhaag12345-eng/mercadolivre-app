@@ -3,11 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { asc, desc, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/db";
-import { sales, stockItems, stockPurchases, type PaymentStatus } from "@/db/schema";
+import { sales, stockItems, stockPurchases, type PaymentStatus, type SaleUnitType } from "@/db/schema";
 import { stockItemSchema, stockPurchaseSchema } from "@/lib/validations";
 import { toNumber } from "@/lib/calculations";
 import { addDays, daysBetweenInclusive } from "@/lib/dates";
 import { todayISO } from "@/lib/format";
+import { toReferenceCostPrice } from "@/lib/product-pricing";
 import type { ActionResult } from "@/actions/products";
 
 export interface StockItemRow {
@@ -16,6 +17,9 @@ export interface StockItemRow {
   name: string;
   ean: string | null;
   minStock: number;
+  saleUnitType: SaleUnitType;
+  unitsPerPackage: number;
+  referenceCostPrice: number | null;
   active: boolean;
   criadoAutomaticamente: boolean;
   // Compras - vendas do Mercado Livre já ligadas a esse item (ver /pendentes)
@@ -59,6 +63,9 @@ export async function listStockItemsWithStock(opts: { onlyActive?: boolean } = {
       name: item.name,
       ean: item.ean,
       minStock: item.minStock,
+      saleUnitType: item.saleUnitType,
+      unitsPerPackage: item.unitsPerPackage,
+      referenceCostPrice: item.referenceCostPrice !== null ? toNumber(item.referenceCostPrice) : null,
       active: item.active,
       criadoAutomaticamente: item.criadoAutomaticamente,
       currentStock,
@@ -90,24 +97,43 @@ function flattenErrors(error: import("zod").ZodError): Record<string, string> {
   return out;
 }
 
+function parseStockItemForm(formData: FormData) {
+  const rawCost = formData.get("costPriceInput");
+  return {
+    name: String(formData.get("name") ?? ""),
+    ean: String(formData.get("ean") ?? ""),
+    minStock: Number(formData.get("minStock") ?? 0),
+    saleUnitType: String(formData.get("saleUnitType") ?? "unitario"),
+    unitsPerPackage: Number(formData.get("unitsPerPackage") ?? 1),
+    // vazio = sem preço de referência ainda (não é o mesmo que custo zero)
+    costPriceInput: rawCost !== null && String(rawCost).trim() !== "" ? Number(rawCost) : undefined,
+  };
+}
+
 export async function createStockItem(
   _prevState: ActionResult | null,
   formData: FormData
 ): Promise<ActionResult> {
-  const parsed = stockItemSchema.safeParse({
-    name: String(formData.get("name") ?? ""),
-    ean: String(formData.get("ean") ?? ""),
-    minStock: Number(formData.get("minStock") ?? 0),
-  });
+  const parsed = stockItemSchema.safeParse(parseStockItemForm(formData));
   if (!parsed.success) return { ok: false, errors: flattenErrors(parsed.error) };
+
+  const referenceCostPrice = toReferenceCostPrice(
+    parsed.data.saleUnitType,
+    parsed.data.unitsPerPackage,
+    parsed.data.costPriceInput
+  );
 
   await db.insert(stockItems).values({
     name: parsed.data.name,
     ean: parsed.data.ean || null,
     minStock: parsed.data.minStock,
+    saleUnitType: parsed.data.saleUnitType,
+    unitsPerPackage: parsed.data.saleUnitType === "unitario" ? 1 : parsed.data.unitsPerPackage,
+    referenceCostPrice: referenceCostPrice !== null ? referenceCostPrice.toString() : null,
   });
 
   revalidatePath("/compras");
+  revalidatePath("/cadastro-produtos");
   revalidatePath("/pendentes");
   revalidatePath("/notas-fiscais");
   revalidatePath("/");
@@ -119,19 +145,30 @@ export async function updateStockItem(
   _prevState: ActionResult | null,
   formData: FormData
 ): Promise<ActionResult> {
-  const parsed = stockItemSchema.safeParse({
-    name: String(formData.get("name") ?? ""),
-    ean: String(formData.get("ean") ?? ""),
-    minStock: Number(formData.get("minStock") ?? 0),
-  });
+  const parsed = stockItemSchema.safeParse(parseStockItemForm(formData));
   if (!parsed.success) return { ok: false, errors: flattenErrors(parsed.error) };
+
+  const referenceCostPrice = toReferenceCostPrice(
+    parsed.data.saleUnitType,
+    parsed.data.unitsPerPackage,
+    parsed.data.costPriceInput
+  );
 
   await db
     .update(stockItems)
-    .set({ name: parsed.data.name, ean: parsed.data.ean || null, minStock: parsed.data.minStock, updatedAt: new Date() })
+    .set({
+      name: parsed.data.name,
+      ean: parsed.data.ean || null,
+      minStock: parsed.data.minStock,
+      saleUnitType: parsed.data.saleUnitType,
+      unitsPerPackage: parsed.data.saleUnitType === "unitario" ? 1 : parsed.data.unitsPerPackage,
+      referenceCostPrice: referenceCostPrice !== null ? referenceCostPrice.toString() : null,
+      updatedAt: new Date(),
+    })
     .where(eq(stockItems.id, id));
 
   revalidatePath("/compras");
+  revalidatePath("/cadastro-produtos");
   revalidatePath("/pendentes");
   revalidatePath("/notas-fiscais");
   revalidatePath("/");
@@ -141,6 +178,7 @@ export async function updateStockItem(
 export async function toggleStockItemActive(id: string, active: boolean) {
   await db.update(stockItems).set({ active, updatedAt: new Date() }).where(eq(stockItems.id, id));
   revalidatePath("/compras");
+  revalidatePath("/cadastro-produtos");
   revalidatePath("/pendentes");
 }
 
@@ -148,6 +186,7 @@ export async function toggleStockItemActive(id: string, active: boolean) {
 export async function dismissNovoStockItem(id: string) {
   await db.update(stockItems).set({ criadoAutomaticamente: false, updatedAt: new Date() }).where(eq(stockItems.id, id));
   revalidatePath("/compras");
+  revalidatePath("/cadastro-produtos");
 }
 
 export interface PurchaseRow {

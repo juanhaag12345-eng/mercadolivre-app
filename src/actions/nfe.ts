@@ -7,7 +7,7 @@ import { nfeEmailAccounts, nfePendentes, stockItems, stockPurchases, type NfeIte
 import { approveNfeSchema } from "@/lib/validations";
 import { scanAllAccountsForNfe } from "@/lib/gmail-nfe";
 import { addDays } from "@/lib/dates";
-import { NOVO_PRODUTO_SENTINEL } from "@/lib/stock-matching";
+import { matchStockItem, NOVO_PRODUTO_SENTINEL } from "@/lib/stock-matching";
 import type { ActionResult } from "@/actions/products";
 
 export async function listEmailAccounts() {
@@ -147,17 +147,31 @@ export async function approveNfePendente(
       let produtoNovo = false;
 
       if (stockItemId === NOVO_PRODUTO_SENTINEL) {
-        const [created] = await tx
-          .insert(stockItems)
-          .values({
-            name: item.descricao,
-            ean: item.ean,
-            minStock: 0,
-            criadoAutomaticamente: true,
-          })
-          .returning({ id: stockItems.id });
-        resolvedStockItemId = created.id;
-        produtoNovo = true;
+        // Reconfere a correspondência com o estoque MAIS RECENTE (dentro da
+        // própria transação, não com a lista que veio nas props do
+        // formulário) — evita cadastrar o mesmo "produto novo" mais de uma
+        // vez quando duas notas com o mesmo item são aprovadas em seguida,
+        // antes da tela recarregar com o item recém-criado pela primeira.
+        const currentStockItems = await tx
+          .select({ id: stockItems.id, name: stockItems.name, ean: stockItems.ean })
+          .from(stockItems);
+        const freshMatch = matchStockItem(item, currentStockItems);
+
+        if (freshMatch) {
+          resolvedStockItemId = freshMatch;
+        } else {
+          const [created] = await tx
+            .insert(stockItems)
+            .values({
+              name: item.descricao,
+              ean: item.ean,
+              minStock: 0,
+              criadoAutomaticamente: true,
+            })
+            .returning({ id: stockItems.id });
+          resolvedStockItemId = created.id;
+          produtoNovo = true;
+        }
       }
 
       await tx.insert(stockPurchases).values({
@@ -183,6 +197,7 @@ export async function approveNfePendente(
 
   revalidatePath("/notas-fiscais");
   revalidatePath("/compras");
+  revalidatePath("/cadastro-produtos");
   revalidatePath("/pendentes");
   revalidatePath("/");
   return { ok: true };

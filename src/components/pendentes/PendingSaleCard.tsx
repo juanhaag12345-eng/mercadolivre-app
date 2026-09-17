@@ -5,8 +5,9 @@ import { useFormStatus } from "react-dom";
 import { CheckCheck, Loader2, PackageSearch, X } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { IntegerInput, Label, MoneyInput, Select } from "@/components/ui/Field";
+import { Input, IntegerInput, Label, MoneyInput, Select } from "@/components/ui/Field";
 import { confirmPendingSale, ignorePendingSale } from "@/actions/mercadolivre";
+import { NOVO_PRODUTO_SENTINEL } from "@/lib/stock-matching";
 import type { StockItemRow } from "@/actions/stock";
 import { formatCurrency, formatDate, formatPercent, formatTime } from "@/lib/format";
 import { DISPATCHER_LABELS, DISPATCHERS, type PendingSale } from "@/db/schema";
@@ -30,6 +31,7 @@ export function PendingSaleCard({
   const [quantity, setQuantity] = useState(pending.quantity);
   const [productCost, setProductCost] = useState(0);
   const [stockItemId, setStockItemId] = useState("");
+  const [newStockItemName, setNewStockItemName] = useState("");
   const [ignoring, startIgnoreTransition] = useTransition();
 
   const selectedStockItem = useMemo(
@@ -134,12 +136,25 @@ export function PendingSaleCard({
             <option value="" disabled>
               Selecione o produto...
             </option>
+            <option value={NOVO_PRODUTO_SENTINEL}>➕ Cadastrar novo produto</option>
             {stockItems.map((item) => (
               <option key={item.id} value={item.id}>
                 #{item.internalCode} {item.name}
               </option>
             ))}
           </Select>
+          {stockItemId === NOVO_PRODUTO_SENTINEL && (
+            <div className="mt-2">
+              <Label hint="cadastra um item novo no estoque com esse nome">Nome do novo produto</Label>
+              <Input
+                name="newStockItemName"
+                value={newStockItemName}
+                onChange={(e) => setNewStockItemName(e.target.value)}
+                error={errors.newStockItemName}
+                autoFocus
+              />
+            </div>
+          )}
         </div>
 
         <div>

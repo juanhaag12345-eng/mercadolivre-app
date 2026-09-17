@@ -26,10 +26,10 @@ export default async function ProdutosPage(props: PageProps<"/produtos">) {
     <div className="p-4 md:p-8 max-w-6xl mx-auto animate-in">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-bold">Produtos</h1>
+          <h1 className="text-2xl font-bold">Anúncios</h1>
           <p className="text-sm text-muted mt-0.5">
             Catálogo manual (taxas, frete e custos configurados por você) e anúncios vendidos pelo Mercado Livre
-            (dados reais, abaixo).
+            (dados reais, abaixo). Pra cadastrar produtos físicos controlados por estoque, use a aba Produtos.
           </p>
         </div>
         <LinkButton href="/produtos/novo" variant="secondary" size="lg">

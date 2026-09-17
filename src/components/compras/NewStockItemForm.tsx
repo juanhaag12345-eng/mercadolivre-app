@@ -4,8 +4,11 @@ import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Loader2, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
-import { IntegerInput, Label, Input } from "@/components/ui/Field";
+import { IntegerInput, Label, Input, MoneyInput, Select } from "@/components/ui/Field";
 import { createStockItem } from "@/actions/stock";
+import { SALE_UNIT_TYPES, SALE_UNIT_TYPE_LABELS, type SaleUnitType } from "@/db/schema";
+import { toReferenceCostPrice } from "@/lib/product-pricing";
+import { formatCurrency } from "@/lib/format";
 import type { ActionResult } from "@/actions/products";
 
 export function NewStockItemForm() {
@@ -15,6 +18,9 @@ export function NewStockItemForm() {
   const [name, setName] = useState("");
   const [ean, setEan] = useState("");
   const [minStock, setMinStock] = useState(0);
+  const [saleUnitType, setSaleUnitType] = useState<SaleUnitType>("unitario");
+  const [unitsPerPackage, setUnitsPerPackage] = useState(1);
+  const [costPriceInput, setCostPriceInput] = useState(0);
   const [formKey, setFormKey] = useState(0);
 
   // Reseta o formulário quando a criação der certo — comparar com o último
@@ -26,6 +32,9 @@ export function NewStockItemForm() {
       setName("");
       setEan("");
       setMinStock(0);
+      setSaleUnitType("unitario");
+      setUnitsPerPackage(1);
+      setCostPriceInput(0);
       setOpen(false);
       setFormKey((k) => k + 1);
     }
@@ -40,6 +49,9 @@ export function NewStockItemForm() {
     );
   }
 
+  const isPacote = saleUnitType !== "unitario";
+  const referenceCostPrice = toReferenceCostPrice(saleUnitType, unitsPerPackage, costPriceInput || undefined);
+
   return (
     <form key={formKey} action={formAction} className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-surface-muted/40 p-3">
       <div className="min-w-[180px] flex-1">
@@ -53,6 +65,33 @@ export function NewStockItemForm() {
       <div className="w-32">
         <Label hint="alerta abaixo disso">Estoque mín.</Label>
         <IntegerInput name="minStock" min={0} value={minStock} onValueChange={setMinStock} error={errors.minStock} />
+      </div>
+      <div className="w-36">
+        <Label>Tipo de venda</Label>
+        <Select
+          name="saleUnitType"
+          value={saleUnitType}
+          onChange={(e) => setSaleUnitType(e.target.value as SaleUnitType)}
+        >
+          {SALE_UNIT_TYPES.map((type) => (
+            <option key={type} value={type}>
+              {SALE_UNIT_TYPE_LABELS[type]}
+            </option>
+          ))}
+        </Select>
+      </div>
+      {isPacote && (
+        <div className="w-40">
+          <Label hint={`unidades por ${SALE_UNIT_TYPE_LABELS[saleUnitType].toLowerCase()}`}>Qtd. no pacote</Label>
+          <IntegerInput name="unitsPerPackage" min={1} value={unitsPerPackage} onValueChange={setUnitsPerPackage} />
+        </div>
+      )}
+      <div className="w-40">
+        <Label hint={isPacote ? "do pacote inteiro" : "por unidade"}>Preço de custo</Label>
+        <MoneyInput name="costPriceInput" value={costPriceInput} onValueChange={setCostPriceInput} />
+        {isPacote && referenceCostPrice !== null && (
+          <p className="mt-1 text-xs text-muted">= {formatCurrency(referenceCostPrice)} por unidade</p>
+        )}
       </div>
       <div className="flex items-center gap-2">
         <SaveButton />

@@ -3,8 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { eq, and } from "drizzle-orm";
 import { db } from "@/db";
-import { pendingSales, sales } from "@/db/schema";
+import { pendingSales, sales, stockItems } from "@/db/schema";
 import { confirmPendingSaleSchema } from "@/lib/validations";
+import { normalizeName, NOVO_PRODUTO_SENTINEL } from "@/lib/stock-matching";
 import { getSettings } from "@/actions/settings";
 import {
   listConnections,
@@ -115,6 +116,7 @@ function parseConfirmForm(formData: FormData) {
     dispatchedBy: String(formData.get("dispatchedBy") ?? ""),
     productCostManual: String(formData.get("productCostManual") ?? "0"),
     stockItemId: String(formData.get("stockItemId") ?? ""),
+    newStockItemName: String(formData.get("newStockItemName") ?? ""),
   };
 }
 
@@ -151,6 +153,30 @@ export async function confirmPendingSale(
   }
 
   const values = parsed.data;
+
+  // Quando o item vendido ainda não existe no estoque, a pessoa pode
+  // cadastrá-lo na hora em vez de precisar sair pra aba Produtos primeiro —
+  // mesmo espírito do "criar produto novo" da aprovação de NF-e. Reconfere
+  // por nome (já normalizado) antes de criar, pra não duplicar se o mesmo
+  // produto novo já tiver sido cadastrado confirmando outra venda pendente
+  // dele um instante antes.
+  let resolvedStockItemId = values.stockItemId;
+  if (resolvedStockItemId === NOVO_PRODUTO_SENTINEL) {
+    const newName = (values.newStockItemName ?? "").trim();
+    if (!newName) {
+      return { ok: false, errors: { newStockItemName: "Informe o nome do novo produto" } };
+    }
+    const normalized = normalizeName(newName);
+    const existingItems = await db.select({ id: stockItems.id, name: stockItems.name }).from(stockItems);
+    const existingMatch = existingItems.find((i) => normalizeName(i.name) === normalized);
+    if (existingMatch) {
+      resolvedStockItemId = existingMatch.id;
+    } else {
+      const [created] = await db.insert(stockItems).values({ name: newName, minStock: 0 }).returning({ id: stockItems.id });
+      resolvedStockItemId = created.id;
+    }
+  }
+
   const partnerSettings = await getSettings();
   const productCostManual = values.productCostManual.toFixed(2);
 
@@ -164,7 +190,7 @@ export async function confirmPendingSale(
       mlSellerId: pending.mlSellerId,
       mlPaymentId: extractFirstPaymentId(pending.rawOrderPayload),
       mlPackId: pending.mlPackId,
-      stockItemId: values.stockItemId,
+      stockItemId: resolvedStockItemId,
       buyerNickname: pending.buyerNickname,
       buyerFullName: pending.buyerFullName,
       quantity: values.quantity,
@@ -214,6 +240,7 @@ export async function confirmPendingSale(
   revalidatePath("/produtos");
   revalidatePath("/custo-fornecimento");
   revalidatePath("/compras");
+  revalidatePath("/cadastro-produtos");
   return { ok: true };
 }
 

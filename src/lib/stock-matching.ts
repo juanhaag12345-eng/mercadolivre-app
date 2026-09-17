@@ -19,7 +19,10 @@ export interface MatchableNfeItem {
   ean: string | null;
 }
 
-function normalizeName(name: string): string {
+// Exportado porque outros fluxos que criam um item de estoque "na hora" a
+// partir de um nome digitado (ex.: /pendentes, quando o item vendido ainda
+// não existe no estoque) usam a mesma regra pra evitar cadastrar duplicado.
+export function normalizeName(name: string): string {
   return name.trim().toLowerCase().replace(/\s+/g, " ");
 }
 

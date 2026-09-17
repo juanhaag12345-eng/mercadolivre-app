@@ -120,6 +120,20 @@
       "when": 1789675835505,
       "tag": "0016_eager_night_thrasher",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1789686849364,
+      "tag": "0017_produtos_tipo_venda_custo",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1789686856202,
+      "tag": "0018_merge_duplicate_stock_items_by_ean",
+      "breakpoints": true
     }
   ]
 }

@@ -5,7 +5,7 @@ import { useFormStatus } from "react-dom";
 import { Check, ChevronDown, ChevronRight, Loader2, Pencil, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Card";
-import { IntegerInput, Input } from "@/components/ui/Field";
+import { IntegerInput, Input, MoneyInput, Select } from "@/components/ui/Field";
 import { PriceHistoryPanel } from "@/components/compras/PriceHistoryPanel";
 import {
   dismissNovoStockItem,
@@ -14,6 +14,9 @@ import {
   type StockItemAnalytics,
   type StockItemRow as StockItemRowData,
 } from "@/actions/stock";
+import { SALE_UNIT_TYPES, SALE_UNIT_TYPE_LABELS, type SaleUnitType } from "@/db/schema";
+import { fromReferenceCostPrice, toReferenceCostPrice } from "@/lib/product-pricing";
+import { formatCurrency } from "@/lib/format";
 import type { ActionResult } from "@/actions/products";
 
 export function StockItemRow({
@@ -31,8 +34,15 @@ export function StockItemRow({
   const [name, setName] = useState(item.name);
   const [ean, setEan] = useState(item.ean ?? "");
   const [minStock, setMinStock] = useState(item.minStock);
+  const [saleUnitType, setSaleUnitType] = useState<SaleUnitType>(item.saleUnitType);
+  const [unitsPerPackage, setUnitsPerPackage] = useState(item.unitsPerPackage);
+  const [costPriceInput, setCostPriceInput] = useState(() =>
+    fromReferenceCostPrice(item.saleUnitType, item.unitsPerPackage, item.referenceCostPrice)
+  );
   const [isTogglingActive, startToggleTransition] = useTransition();
   const [isDismissing, startDismissTransition] = useTransition();
+  const isPacote = saleUnitType !== "unitario";
+  const editedReferenceCostPrice = toReferenceCostPrice(saleUnitType, unitsPerPackage, costPriceInput || undefined);
 
   // Fecha o modo de edição quando a atualização der certo — comparar com o
   // último `state` já tratado (em vez de um useEffect) evita um re-render
@@ -46,7 +56,7 @@ export function StockItemRow({
   if (editing) {
     return (
       <tr className="border-b border-border last:border-0 bg-surface-muted/40">
-        <td colSpan={5} className="px-4 py-3">
+        <td colSpan={6} className="px-4 py-3">
           <form action={formAction} className="flex flex-wrap items-end gap-3">
             <span className="text-muted font-mono text-sm">#{item.internalCode}</span>
             <div className="min-w-[160px] flex-1">
@@ -57,6 +67,36 @@ export function StockItemRow({
             </div>
             <div className="w-28">
               <IntegerInput name="minStock" min={0} value={minStock} onValueChange={setMinStock} error={errors.minStock} />
+            </div>
+            <div className="w-36">
+              <Select
+                name="saleUnitType"
+                value={saleUnitType}
+                onChange={(e) => setSaleUnitType(e.target.value as SaleUnitType)}
+              >
+                {SALE_UNIT_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {SALE_UNIT_TYPE_LABELS[type]}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            {isPacote && (
+              <div className="w-32">
+                <IntegerInput
+                  name="unitsPerPackage"
+                  min={1}
+                  value={unitsPerPackage}
+                  onValueChange={setUnitsPerPackage}
+                  placeholder="Qtd. no pacote"
+                />
+              </div>
+            )}
+            <div className="w-36">
+              <MoneyInput name="costPriceInput" value={costPriceInput} onValueChange={setCostPriceInput} />
+              {isPacote && editedReferenceCostPrice !== null && (
+                <p className="mt-1 text-xs text-muted">= {formatCurrency(editedReferenceCostPrice)}/un.</p>
+              )}
             </div>
             <SaveButton />
             <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(false)}>
@@ -109,6 +149,19 @@ export function StockItemRow({
         <td className="px-4 py-2.5 text-sm">
           <Badge tone={item.lowStock ? "danger" : "success"}>{item.currentStock} un.</Badge>
         </td>
+        <td className="px-4 py-2.5 text-sm text-muted">
+          {item.saleUnitType !== "unitario" && (
+            <p>
+              {SALE_UNIT_TYPE_LABELS[item.saleUnitType]}
+              {item.unitsPerPackage > 1 ? ` c/${item.unitsPerPackage}` : ""}
+            </p>
+          )}
+          {item.referenceCostPrice !== null && (
+            <p className={item.saleUnitType !== "unitario" ? "text-xs" : ""}>
+              {formatCurrency(item.referenceCostPrice)}/un.
+            </p>
+          )}
+        </td>
         <td className="px-4 py-2.5">
           <div className="flex items-center justify-end gap-1">
             <button
@@ -133,7 +186,7 @@ export function StockItemRow({
       </tr>
       {expanded && (
         <tr className="border-b border-border last:border-0 bg-surface-muted/30">
-          <td colSpan={6} className="px-4 py-3">
+          <td colSpan={7} className="px-4 py-3">
             {analytics ? (
               <PriceHistoryPanel analytics={analytics} />
             ) : (

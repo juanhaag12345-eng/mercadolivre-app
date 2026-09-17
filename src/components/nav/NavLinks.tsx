@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Boxes, FileText, Inbox, LayoutDashboard, Menu, Package, ShoppingBag, ShoppingCart, Wallet, X } from "lucide-react";
+import { Boxes, FileText, Inbox, LayoutDashboard, Megaphone, Menu, Package, ShoppingBag, ShoppingCart, Wallet, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const links = [
@@ -11,9 +11,10 @@ const links = [
   { href: "/vendas", label: "Vendas", icon: ShoppingBag },
   { href: "/pendentes", label: "Pendentes", icon: Inbox },
   { href: "/liberacoes", label: "Liberações", icon: Wallet },
-  { href: "/compras", label: "Compras", icon: ShoppingCart },
+  { href: "/compras", label: "Compras/Estoque", icon: ShoppingCart },
+  { href: "/cadastro-produtos", label: "Produtos", icon: Package },
   { href: "/notas-fiscais", label: "Notas Fiscais", icon: FileText },
-  { href: "/produtos", label: "Produtos", icon: Package },
+  { href: "/produtos", label: "Anúncios", icon: Megaphone },
   { href: "/custo-fornecimento", label: "Custo Fornecimento", icon: Boxes },
 ];
 

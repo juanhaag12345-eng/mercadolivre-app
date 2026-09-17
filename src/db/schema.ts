@@ -78,6 +78,21 @@ export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
   pago: "Pago",
 };
 
+// Como um item de estoque é comprado/vendido: sempre por unidade, ou em
+// pacotes fixos (display, conjunto ou caixa) — quando não é "unitario", o
+// preço de custo é digitado pelo pacote inteiro e convertido pra um preço
+// de referência por unidade (ver lib/product-pricing.ts). O controle de
+// estoque em si (compras, vendas, alerta de estoque mínimo) continua
+// sempre contando em unidades, nunca em pacotes.
+export const SALE_UNIT_TYPES = ["unitario", "display", "conjunto", "caixa"] as const;
+export type SaleUnitType = (typeof SALE_UNIT_TYPES)[number];
+export const SALE_UNIT_TYPE_LABELS: Record<SaleUnitType, string> = {
+  unitario: "Unitário",
+  display: "Display",
+  conjunto: "Conjunto",
+  caixa: "Caixa",
+};
+
 export const products = pgTable(
   "products",
   {
@@ -158,6 +173,15 @@ export const stockItems = pgTable(
     // esse item) cai para esse nível ou menos, o item aparece como alerta
     // de reposição no dashboard e destacado na aba Compras.
     minStock: integer("min_stock").notNull().default(0),
+    // Como esse item é comprado/vendido — ver SALE_UNIT_TYPES acima.
+    saleUnitType: text("sale_unit_type", { enum: SALE_UNIT_TYPES }).notNull().default("unitario"),
+    // Quantas unidades vêm em 1 display/conjunto/caixa — irrelevante (fica
+    // 1) quando saleUnitType é "unitario".
+    unitsPerPackage: integer("units_per_package").notNull().default(1),
+    // Preço de custo de referência pro cadastro, sempre por unidade — é só
+    // uma referência (pré-preenche o formulário de compra), não substitui o
+    // histórico de preços de compra de verdade em stock_purchases.
+    referenceCostPrice: numeric("reference_cost_price", { precision: 12, scale: 2 }),
     // Marca um item criado automaticamente (sem intervenção manual) a
     // partir de um item de NF-e não reconhecido — fica com essa marca até
     // alguém revisar o cadastro e dispensar o aviso "PRODUTO NOVO".

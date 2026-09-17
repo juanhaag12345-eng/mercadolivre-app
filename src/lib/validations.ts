@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DISPATCHERS, ORDER_STATUSES, PAYMENT_METHODS, SALE_FEE_TYPES } from "@/db/schema";
+import { DISPATCHERS, ORDER_STATUSES, PAYMENT_METHODS, SALE_FEE_TYPES, SALE_UNIT_TYPES } from "@/db/schema";
 
 export const productSchema = z.object({
   name: z.string().trim().min(2, "Informe o nome do produto"),
@@ -56,14 +56,28 @@ export const confirmPendingSaleSchema = z.object({
   // Item de estoque a que essa venda se refere — usado pra dar baixa no
   // estoque (ver actions/stock.ts). Obrigatório: sem isso o controle de
   // estoque não sabe o que descontar.
-  stockItemId: z.string().uuid("Selecione o produto para dar baixa no estoque"),
+  // Aceita tanto um uuid de item já cadastrado quanto o sentinela "criar
+  // produto novo" (ver lib/stock-matching) — por isso não é .uuid() direto.
+  stockItemId: z.string().min(1, "Selecione o produto para dar baixa no estoque"),
+  // Só preenchido quando stockItemId é o sentinela "criar novo": nome do
+  // item de estoque a cadastrar na hora, sem sair da tela de Pendentes.
+  newStockItemName: z.string().trim().optional(),
 });
 
-// Cadastro/edição de um item de estoque (aba Compras).
+// Cadastro/edição de um item de estoque (aba Produtos).
 export const stockItemSchema = z.object({
   name: z.string().trim().min(2, "Informe o nome do item"),
   ean: z.string().trim().optional().or(z.literal("")),
   minStock: z.coerce.number().int().min(0, "Não pode ser negativo"),
+  saleUnitType: z.enum(SALE_UNIT_TYPES).default("unitario"),
+  // Só relevante quando saleUnitType não é "unitario" — quantas unidades
+  // vêm em 1 display/conjunto/caixa.
+  unitsPerPackage: z.coerce.number().int().min(1, "Mínimo 1").default(1),
+  // Preço de custo como a pessoa digita: por unidade se "unitário", ou do
+  // pacote inteiro se display/conjunto/caixa — convertido pra preço de
+  // referência por unidade antes de salvar (ver lib/product-pricing.ts).
+  // Opcional: um produto pode ser cadastrado sem preço de referência ainda.
+  costPriceInput: z.coerce.number().min(0, "Não pode ser negativo").optional(),
 });
 
 // Aprovação de uma NF-e recebida por e-mail (aba Notas Fiscais): a data, a

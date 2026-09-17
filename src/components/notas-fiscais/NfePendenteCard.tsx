@@ -105,7 +105,17 @@ export function NfePendenteCard({
                       <Badge tone="accent">PRODUTO NOVO</Badge>) a não ser que você escolha outro abaixo.
                     </p>
                   )}
-                  <Select name={`item_${index}_stockItemId`} defaultValue={defaultValue}>
+                  <Select
+                    // Força remontar o <select> quando a correspondência
+                    // sugerida mudar (ex.: depois de aprovar outra nota com
+                    // o mesmo item, que revalida a lista de estoque) — sem
+                    // isso o valor escolhido ficaria "preso" no que foi
+                    // mostrado na primeira renderização (defaultValue só
+                    // vale pra montagem inicial de um campo não controlado).
+                    key={matchedId ?? NOVO_PRODUTO_SENTINEL}
+                    name={`item_${index}_stockItemId`}
+                    defaultValue={defaultValue}
+                  >
                     <option value={NOVO_PRODUTO_SENTINEL}>➕ Criar produto novo com esse item</option>
                     <option value="">Ignorar esse item</option>
                     {stockItems.map((stockItem) => (

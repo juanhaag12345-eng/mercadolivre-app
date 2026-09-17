@@ -1,7 +1,7 @@
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Package } from "lucide-react";
 import { Card } from "@/components/ui/Card";
-import { getStockAnalytics, listStockItemsWithStock, listPurchases, type PurchaseFilter } from "@/actions/stock";
-import { StockItemsList } from "@/components/compras/StockItemsList";
+import { LinkButton } from "@/components/ui/Button";
+import { listStockItemsWithStock, listPurchases, type PurchaseFilter } from "@/actions/stock";
 import { PurchaseForm } from "@/components/compras/PurchaseForm";
 import { PurchaseHistory } from "@/components/compras/PurchaseHistory";
 
@@ -16,22 +16,23 @@ export default async function ComprasPage(props: PageProps<"/compras">) {
     ? (filtroParam as PurchaseFilter)
     : "todas";
 
-  const [items, purchases, analytics] = await Promise.all([
-    listStockItemsWithStock(),
-    listPurchases({ filtro }),
-    getStockAnalytics(),
-  ]);
+  const [items, purchases] = await Promise.all([listStockItemsWithStock(), listPurchases({ filtro })]);
 
   const lowStockItems = items.filter((item) => item.active && item.lowStock);
 
   return (
     <div className="p-4 md:p-8 max-w-5xl mx-auto animate-in">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold">Compras e estoque</h1>
-        <p className="text-sm text-muted mt-0.5">
-          Cadastro de produtos, controle de estoque e registro de compras (com ou sem nota fiscal) — ligado às
-          vendas confirmadas em Pendentes.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl font-bold">Compras/Estoque</h1>
+          <p className="text-sm text-muted mt-0.5">
+            Registro de compras (com ou sem nota fiscal) e controle de estoque — ligado às vendas confirmadas em
+            Pendentes. Pra cadastrar, editar ou excluir produtos, use a aba Produtos.
+          </p>
+        </div>
+        <LinkButton href="/cadastro-produtos" variant="outline" size="md" className="shrink-0">
+          <Package size={16} /> Gerenciar produtos
+        </LinkButton>
       </div>
 
       {lowStockItems.length > 0 && (
@@ -52,12 +53,10 @@ export default async function ComprasPage(props: PageProps<"/compras">) {
         </Card>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <PurchaseForm stockItems={items.filter((i) => i.active)} />
         <PurchaseHistory purchases={purchases} filtro={filtro} />
       </div>
-
-      <StockItemsList items={items} analytics={analytics} />
     </div>
   );
 }
