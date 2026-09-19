@@ -160,9 +160,15 @@ export async function approveNfePendente(
         if (freshMatch) {
           resolvedStockItemId = freshMatch;
         } else {
+          // internalCode não é mais `serial` (ver schema.ts) — calculamos o
+          // próximo número (MAX + 1) dentro da própria transação.
+          const [{ maxCode }] = await tx
+            .select({ maxCode: sql<number>`coalesce(max(${stockItems.internalCode}), 0)` })
+            .from(stockItems);
           const [created] = await tx
             .insert(stockItems)
             .values({
+              internalCode: maxCode + 1,
               name: item.descricao,
               ean: item.ean,
               minStock: 0,

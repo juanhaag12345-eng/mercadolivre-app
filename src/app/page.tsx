@@ -18,8 +18,9 @@ import { getSalesForRange } from "@/actions/sales";
 import { getMonthlyGoal } from "@/actions/goals";
 import { getSettings } from "@/actions/settings";
 import { listProducts } from "@/actions/products";
+import { listConnections } from "@/actions/mercadolivre";
 import { getPendingReleaseSummary } from "@/actions/liberacoes";
-import { getOutOfStockItems, getStockAlerts, getUpcomingPayments, listPurchases } from "@/actions/stock";
+import { getOutOfStockItems, getStockAlerts, getUpcomingPayments, listPurchases, listStockItemsWithStock } from "@/actions/stock";
 import { DashboardFilterBar } from "@/components/dashboard/DashboardFilterBar";
 import { FeeCard } from "@/components/dashboard/FeeCard";
 import { GoalCard } from "@/components/dashboard/GoalCard";
@@ -43,6 +44,7 @@ export default async function DashboardPage(props: PageProps<"/">) {
   const deParam = typeof searchParams.de === "string" && searchParams.de ? searchParams.de : undefined;
   const ateParam = typeof searchParams.ate === "string" && searchParams.ate ? searchParams.ate : undefined;
   const productId = typeof searchParams.produto === "string" && searchParams.produto ? searchParams.produto : undefined;
+  const contaParam = typeof searchParams.conta === "string" && searchParams.conta ? searchParams.conta : undefined;
 
   const { periodo, from, to } = resolveDashboardPeriod({ periodo: periodoParam, de: deParam, ate: ateParam });
 
@@ -60,6 +62,7 @@ export default async function DashboardPage(props: PageProps<"/">) {
   const [
     goal,
     products,
+    connections,
     currentSales,
     goalMonthSales,
     partnerSettings,
@@ -69,19 +72,26 @@ export default async function DashboardPage(props: PageProps<"/">) {
     outOfStockItems,
     upcomingPayments,
     recentPurchases,
+    stockItemsForNaming,
   ] = await Promise.all([
     getMonthlyGoal(yearMonth),
     listProducts(),
-    getSalesForRange(from, to, productId),
+    listConnections(),
+    getSalesForRange(from, to, productId, contaParam),
+    // A meta de faturamento é sempre da empresa inteira — não filtra por
+    // conta nem por produto, mesmo período selecionado.
     getSalesForRange(goalFrom, goalTo),
     getSettings(),
-    prevPeriod ? getSalesForRange(prevPeriod.from, prevPeriod.to, productId) : Promise.resolve([]),
-    getPendingReleaseSummary(),
+    prevPeriod ? getSalesForRange(prevPeriod.from, prevPeriod.to, productId, contaParam) : Promise.resolve([]),
+    getPendingReleaseSummary(contaParam),
     getStockAlerts(),
     getOutOfStockItems(),
     getUpcomingPayments(6),
     listPurchases({ limit: 5 }),
+    listStockItemsWithStock(),
   ]);
+
+  const stockItemById = new Map(stockItemsForNaming.map((item) => [item.id, item]));
 
   const totals = currentSales.reduce(
     (acc, s) => {
@@ -174,11 +184,20 @@ export default async function DashboardPage(props: PageProps<"/">) {
     });
   }
 
+  // Agrupa por PRODUTO FÍSICO (stockItemId, escolhido manualmente ao
+  // confirmar cada venda em Pendentes) quando a venda tem um — assim uma
+  // venda do mesmo produto feita por contas diferentes do Mercado Livre (que
+  // têm anúncios com títulos diferentes) soma no mesmo lugar, em vez de virar
+  // linhas separadas por título de anúncio que "escondem" o crescimento de
+  // uma conta nova. Vendas manuais (sem stockItemId) continuam agrupadas
+  // pelo nome do produto, como sempre.
   const byProduct = new Map<string, TopProductRow>();
   for (const sale of currentSales) {
-    const row = byProduct.get(sale.productNameSnapshot) ?? {
-      name: sale.productNameSnapshot,
-      internalCode: sale.productInternalCode,
+    const stockItem = sale.stockItemId ? stockItemById.get(sale.stockItemId) : undefined;
+    const groupKey = stockItem ? `estoque:${stockItem.id}` : `titulo:${sale.productNameSnapshot}`;
+    const row = byProduct.get(groupKey) ?? {
+      name: stockItem ? stockItem.name : sale.productNameSnapshot,
+      internalCode: stockItem ? stockItem.internalCode : sale.productInternalCode,
       revenue: 0,
       profit: 0,
       quantity: 0,
@@ -188,7 +207,7 @@ export default async function DashboardPage(props: PageProps<"/">) {
     row.profit += sale.profit;
     row.quantity += sale.quantity;
     row.shippingTotal += sale.shippingTotal;
-    byProduct.set(sale.productNameSnapshot, row);
+    byProduct.set(groupKey, row);
   }
   const topProducts = Array.from(byProduct.values())
     .sort((a, b) => b.revenue - a.revenue)
@@ -215,7 +234,8 @@ export default async function DashboardPage(props: PageProps<"/">) {
 
       <DashboardFilterBar
         products={products}
-        current={{ periodo: periodo as PeriodKey, de: deParam, ate: ateParam, produto: productId }}
+        connections={connections}
+        current={{ periodo: periodo as PeriodKey, de: deParam, ate: ateParam, produto: productId, conta: contaParam }}
         resolvedFrom={from}
         resolvedTo={to}
       />

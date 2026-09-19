@@ -1,16 +1,20 @@
 import { Filter, X } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Input, Select } from "@/components/ui/Field";
+import { accountLabel } from "@/lib/accounts";
 import type { Product } from "@/db/schema";
+import type { MlConnection } from "@/lib/mercadolivre";
 
 export function SalesFilterBar({
   products,
+  connections,
   current,
 }: {
   products: Product[];
-  current: { productId?: string; from?: string; to?: string; status?: string };
+  connections: MlConnection[];
+  current: { productId?: string; from?: string; to?: string; status?: string; conta?: string };
 }) {
-  const hasFilters = current.productId || current.from || current.to || current.status;
+  const hasFilters = current.productId || current.from || current.to || current.status || current.conta;
   return (
     <Card>
       <form action="/vendas" method="GET" className="flex flex-wrap items-end gap-3">
@@ -43,6 +47,19 @@ export function SalesFilterBar({
             <option value="despachado">Despachado</option>
           </Select>
         </div>
+        {connections.length > 0 && (
+          <div className="w-full sm:w-56">
+            <label className="mb-1.5 block text-sm font-medium">Conta do Mercado Livre</label>
+            <Select name="conta" defaultValue={current.conta ?? ""}>
+              <option value="">Todas as contas</option>
+              {connections.map((c) => (
+                <option key={c.id} value={c.mlUserId}>
+                  {accountLabel(c)}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
         <button
           type="submit"
           className="h-10 rounded-xl bg-foreground px-5 text-sm font-medium text-white hover:bg-neutral-800"

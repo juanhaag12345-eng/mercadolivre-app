@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { pendingSales, sales, stockItems } from "@/db/schema";
 import { confirmPendingSaleSchema } from "@/lib/validations";
@@ -100,12 +100,11 @@ export async function removeMlAccount(accountId: string): Promise<void> {
   revalidatePath("/pendentes");
 }
 
-export async function listPendingSales() {
-  const rows = await db
-    .select()
-    .from(pendingSales)
-    .where(eq(pendingSales.status, "pendente"))
-    .orderBy(pendingSales.orderDate);
+export async function listPendingSales(mlSellerId?: string) {
+  const condition = mlSellerId
+    ? and(eq(pendingSales.status, "pendente"), eq(pendingSales.mlSellerId, mlSellerId))
+    : eq(pendingSales.status, "pendente");
+  const rows = await db.select().from(pendingSales).where(condition).orderBy(pendingSales.orderDate);
   return rows;
 }
 
@@ -172,7 +171,15 @@ export async function confirmPendingSale(
     if (existingMatch) {
       resolvedStockItemId = existingMatch.id;
     } else {
-      const [created] = await db.insert(stockItems).values({ name: newName, minStock: 0 }).returning({ id: stockItems.id });
+      // internalCode não é mais `serial` (ver schema.ts) — calculamos o
+      // próximo número (MAX + 1) na hora de criar.
+      const [{ maxCode }] = await db
+        .select({ maxCode: sql<number>`coalesce(max(${stockItems.internalCode}), 0)` })
+        .from(stockItems);
+      const [created] = await db
+        .insert(stockItems)
+        .values({ internalCode: maxCode + 1, name: newName, minStock: 0 })
+        .returning({ id: stockItems.id });
       resolvedStockItemId = created.id;
     }
   }
@@ -195,10 +202,11 @@ export async function confirmPendingSale(
       buyerFullName: pending.buyerFullName,
       quantity: values.quantity,
       saleDate: values.saleDate,
-      // Confirmar uma venda vinda do Mercado Livre pressupõe que ela já
-      // existe e, na prática, já foi despachada — diferente do cadastro
-      // manual, onde a venda normalmente ainda está para ser despachada.
-      orderStatus: "despachado",
+      // Entra sempre como "pendente" — quem confirma a entrada em Pendentes
+      // não é necessariamente quem despacha o pacote, então o Juan ou o Djow
+      // marcam "despachado" manualmente em /vendas quando isso realmente
+      // acontecer (ver updateSaleStatus em actions/sales.ts).
+      orderStatus: "pendente",
       dispatchedBy: values.dispatchedBy,
       operationalFeePercentSnapshot: partnerSettings.operationalFeePercent.toString(),
       reservePercentSnapshot: partnerSettings.reservePercent.toString(),

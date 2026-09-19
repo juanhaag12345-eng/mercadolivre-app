@@ -161,9 +161,12 @@ export const stockItems = pgTable(
   "stock_items",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    // Código interno sequencial (1, 2, 3...) — mesmo esquema do
-    // `products.internalCode`, mas numa sequência própria e independente.
-    internalCode: serial("internal_code").notNull().unique(),
+    // Código interno sequencial (1, 2, 3...) — gerenciado pela aplicação (não
+    // é mais `serial`/sequência do Postgres) porque, ao excluir um item, os
+    // códigos dos itens seguintes são renumerados pra fechar o buraco (ex:
+    // excluir o #1 faz o #2 virar #1) — uma sequência do Postgres nunca
+    // reutiliza nem reordena números, então não daria pra fazer isso com ela.
+    internalCode: integer("internal_code").notNull().unique(),
     name: text("name").notNull(),
     // Código de barras (EAN/GTIN) do produto, quando conhecido — usado para
     // identificar automaticamente esse item nos itens de uma NF-e recebida

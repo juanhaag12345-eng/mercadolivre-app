@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Plus, CheckCircle2 } from "lucide-react";
 import { listProducts } from "@/actions/products";
 import { listSales } from "@/actions/sales";
+import { listConnections } from "@/actions/mercadolivre";
 import { SalesFilterBar } from "@/components/sales/SalesFilterBar";
 import { SalesTable } from "@/components/sales/SalesTable";
 import type { OrderStatus } from "@/db/schema";
@@ -17,11 +18,13 @@ export default async function VendasPage(props: PageProps<"/vendas">) {
     typeof searchParams.status === "string" && searchParams.status
       ? (searchParams.status as OrderStatus)
       : undefined;
+  const mlSellerId = typeof searchParams.conta === "string" && searchParams.conta ? searchParams.conta : undefined;
   const registrado = typeof searchParams.registrado === "string" ? searchParams.registrado : undefined;
 
-  const [products, sales] = await Promise.all([
+  const [products, connections, sales] = await Promise.all([
     listProducts(),
-    listSales({ productId, from, to, status }),
+    listConnections(),
+    listSales({ productId, from, to, status, mlSellerId }),
   ]);
 
   return (
@@ -54,7 +57,7 @@ export default async function VendasPage(props: PageProps<"/vendas">) {
         <div className="flex items-center justify-between">
           <h2 className="font-semibold">Vendas realizadas</h2>
         </div>
-        <SalesFilterBar products={products} current={{ productId, from, to, status }} />
+        <SalesFilterBar products={products} connections={connections} current={{ productId, from, to, status, conta: mlSellerId }} />
         <SalesTable sales={sales} />
       </div>
     </div>

@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { asc, desc, eq, isNotNull } from "drizzle-orm";
+import { asc, desc, eq, gt, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { sales, stockItems, stockPurchases, type PaymentStatus, type SaleUnitType } from "@/db/schema";
 import { stockItemSchema, stockPurchaseSchema } from "@/lib/validations";
@@ -123,13 +123,65 @@ export async function createStockItem(
     parsed.data.costPriceInput
   );
 
-  await db.insert(stockItems).values({
-    name: parsed.data.name,
-    ean: parsed.data.ean || null,
-    minStock: parsed.data.minStock,
-    saleUnitType: parsed.data.saleUnitType,
-    unitsPerPackage: parsed.data.saleUnitType === "unitario" ? 1 : parsed.data.unitsPerPackage,
-    referenceCostPrice: referenceCostPrice !== null ? referenceCostPrice.toString() : null,
+  // internalCode não é mais `serial` (ver comentário no schema) — calculamos
+  // o próximo número dentro da transação (MAX + 1) pra sempre preencher o
+  // buraco deixado por uma exclusão em vez de pular números.
+  await db.transaction(async (tx) => {
+    const [{ maxCode }] = await tx
+      .select({ maxCode: sql<number>`coalesce(max(${stockItems.internalCode}), 0)` })
+      .from(stockItems);
+
+    await tx.insert(stockItems).values({
+      internalCode: maxCode + 1,
+      name: parsed.data.name,
+      ean: parsed.data.ean || null,
+      minStock: parsed.data.minStock,
+      saleUnitType: parsed.data.saleUnitType,
+      unitsPerPackage: parsed.data.saleUnitType === "unitario" ? 1 : parsed.data.unitsPerPackage,
+      referenceCostPrice: referenceCostPrice !== null ? referenceCostPrice.toString() : null,
+    });
+  });
+
+  revalidatePath("/compras");
+  revalidatePath("/cadastro-produtos");
+  revalidatePath("/pendentes");
+  revalidatePath("/notas-fiscais");
+  revalidatePath("/");
+  return { ok: true };
+}
+
+/**
+ * Exclui definitivamente um item de estoque — diferente de `toggleStockItemActive`,
+ * que só desativa mantendo o histórico. Só permite excluir quando não há
+ * nenhuma compra ou venda ligada ao item (pra nunca apagar histórico real);
+ * quando há, retorna erro orientando a desativar em vez de excluir.
+ *
+ * Depois de excluir, renumera o `internalCode` de todos os itens seguintes
+ * (decrementa em 1 os que eram maiores que o do item excluído) pra fechar o
+ * buraco — ex: excluir o #1 faz o #2 virar #1, o #3 virar #2, etc.
+ */
+export async function deleteStockItem(id: string): Promise<{ ok: boolean; message?: string }> {
+  const [item] = await db.select().from(stockItems).where(eq(stockItems.id, id)).limit(1);
+  if (!item) return { ok: false, message: "Esse item não existe mais." };
+
+  const [purchaseRows, saleRows] = await Promise.all([
+    db.select({ id: stockPurchases.id }).from(stockPurchases).where(eq(stockPurchases.stockItemId, id)).limit(1),
+    db.select({ id: sales.id }).from(sales).where(eq(sales.stockItemId, id)).limit(1),
+  ]);
+
+  if (purchaseRows.length > 0 || saleRows.length > 0) {
+    return {
+      ok: false,
+      message: `Não é possível excluir "${item.name}" porque já existe compra e/ou venda registrada com ele — isso apagaria histórico real. Desative o item em vez de excluir (ele some das opções de seleção, mas o histórico continua intacto).`,
+    };
+  }
+
+  await db.transaction(async (tx) => {
+    await tx.delete(stockItems).where(eq(stockItems.id, id));
+    await tx
+      .update(stockItems)
+      .set({ internalCode: sql`${stockItems.internalCode} - 1` })
+      .where(gt(stockItems.internalCode, item.internalCode));
   });
 
   revalidatePath("/compras");

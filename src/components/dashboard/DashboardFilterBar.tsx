@@ -2,7 +2,9 @@ import { CalendarRange, X } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Input, Select } from "@/components/ui/Field";
 import { formatDate } from "@/lib/format";
+import { accountLabel } from "@/lib/accounts";
 import type { Product } from "@/db/schema";
+import type { MlConnection } from "@/lib/mercadolivre";
 import type { PeriodKey } from "@/lib/dashboard-period";
 
 const PERIOD_OPTIONS: { value: PeriodKey; label: string }[] = [
@@ -17,16 +19,18 @@ const PERIOD_OPTIONS: { value: PeriodKey; label: string }[] = [
 
 export function DashboardFilterBar({
   products,
+  connections,
   current,
   resolvedFrom,
   resolvedTo,
 }: {
   products: Product[];
-  current: { periodo: PeriodKey; de?: string; ate?: string; produto?: string };
+  connections: MlConnection[];
+  current: { periodo: PeriodKey; de?: string; ate?: string; produto?: string; conta?: string };
   resolvedFrom?: string;
   resolvedTo?: string;
 }) {
-  const hasFilters = current.periodo !== "mes-atual" || current.produto;
+  const hasFilters = current.periodo !== "mes-atual" || current.produto || current.conta;
 
   return (
     <Card className="mb-6">
@@ -62,6 +66,19 @@ export function DashboardFilterBar({
             ))}
           </Select>
         </div>
+        {connections.length > 0 && (
+          <div className="w-full sm:w-56">
+            <label className="mb-1.5 block text-sm font-medium">Conta do Mercado Livre</label>
+            <Select name="conta" defaultValue={current.conta ?? ""}>
+              <option value="">Todas as contas</option>
+              {connections.map((c) => (
+                <option key={c.id} value={c.mlUserId}>
+                  {accountLabel(c)}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
         <button
           type="submit"
           className="h-10 rounded-xl bg-foreground px-5 text-sm font-medium text-white hover:bg-neutral-800"

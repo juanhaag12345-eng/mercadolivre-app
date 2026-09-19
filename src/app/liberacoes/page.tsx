@@ -4,12 +4,16 @@ import { listLiberacoes } from "@/actions/liberacoes";
 import { listConnections } from "@/actions/mercadolivre";
 import { LiberacaoCard } from "@/components/liberacoes/LiberacaoCard";
 import { AtualizarLiberacoesButton } from "@/components/liberacoes/AtualizarLiberacoesButton";
+import { AccountFilterBar } from "@/components/shared/AccountFilterBar";
 import { formatCurrency } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-export default async function LiberacoesPage() {
-  const [sales, connections] = await Promise.all([listLiberacoes(), listConnections()]);
+export default async function LiberacoesPage(props: PageProps<"/liberacoes">) {
+  const searchParams = await props.searchParams;
+  const mlSellerId = typeof searchParams.conta === "string" && searchParams.conta ? searchParams.conta : undefined;
+
+  const [sales, connections] = await Promise.all([listLiberacoes(mlSellerId), listConnections()]);
 
   const accountLabelByMlUserId = new Map(
     connections.map((c) => [c.mlUserId, c.nickname ?? `Vendedor ${c.mlUserId}`])
@@ -42,6 +46,8 @@ export default async function LiberacoesPage() {
         </div>
         <p className="text-xl font-bold text-success">{formatCurrency(total)}</p>
       </Card>
+
+      <AccountFilterBar connections={connections} current={mlSellerId} action="/liberacoes" />
 
       {sales.length === 0 ? (
         <Card className="flex flex-col items-center justify-center gap-2 py-12 text-center">

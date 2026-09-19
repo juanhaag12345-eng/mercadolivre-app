@@ -30,8 +30,9 @@ function withNetAmount(sale: ReturnType<typeof withFinancials>): LiberacaoRow {
   return { ...sale, netAmount: sale.revenue - sale.saleFeeAmount - sale.shippingTotal };
 }
 
-async function loadPendingReleaseSales(): Promise<LiberacaoRow[]> {
-  const rows = await db.select().from(sales).where(notReleasedCondition()).orderBy(sales.saleDate);
+async function loadPendingReleaseSales(mlSellerId?: string): Promise<LiberacaoRow[]> {
+  const condition = mlSellerId ? and(notReleasedCondition(), eq(sales.mlSellerId, mlSellerId)) : notReleasedCondition();
+  const rows = await db.select().from(sales).where(condition).orderBy(sales.saleDate);
   return rows.map((row) => withNetAmount(withFinancials(row)));
 }
 
@@ -39,16 +40,16 @@ async function loadPendingReleaseSales(): Promise<LiberacaoRow[]> {
  * Lista cada venda do Mercado Livre ainda não liberada, para a aba
  * /liberacoes — uma por linha, com todo o detalhe (não é uma agregação).
  */
-export async function listLiberacoes(): Promise<LiberacaoRow[]> {
-  return loadPendingReleaseSales();
+export async function listLiberacoes(mlSellerId?: string): Promise<LiberacaoRow[]> {
+  return loadPendingReleaseSales(mlSellerId);
 }
 
 /**
  * Resumo para o card do dashboard: quantas vendas e quanto, no total, ainda
  * está pendente de cair na conta.
  */
-export async function getPendingReleaseSummary(): Promise<{ count: number; total: number }> {
-  const rows = await loadPendingReleaseSales();
+export async function getPendingReleaseSummary(mlSellerId?: string): Promise<{ count: number; total: number }> {
+  const rows = await loadPendingReleaseSales(mlSellerId);
   const total = rows.reduce((sum, r) => sum + r.netAmount, 0);
   return { count: rows.length, total };
 }

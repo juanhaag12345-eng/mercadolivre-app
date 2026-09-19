@@ -134,6 +134,13 @@
       "when": 1789686856202,
       "tag": "0018_merge_duplicate_stock_items_by_ean",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1789829084075,
+      "tag": "0019_stock_items_internal_code_app_managed",
+      "breakpoints": true
     }
   ]
 }

@@ -16,6 +16,10 @@ export interface SalesFilter {
   from?: string;
   to?: string;
   status?: OrderStatus;
+  // Filtra por conta vendedora do Mercado Livre (sales.mlSellerId) — não se
+  // aplica a vendas manuais (mlSellerId sempre null nelas), que somem do
+  // resultado quando esse filtro é usado.
+  mlSellerId?: string;
 }
 
 // Junta o código interno atual do produto (quando ele ainda existe) a cada
@@ -33,6 +37,7 @@ export async function listSales(filter: SalesFilter = {}) {
   if (filter.from) conditions.push(gte(sales.saleDate, filter.from));
   if (filter.to) conditions.push(lte(sales.saleDate, filter.to));
   if (filter.status) conditions.push(eq(sales.orderStatus, filter.status));
+  if (filter.mlSellerId) conditions.push(eq(sales.mlSellerId, filter.mlSellerId));
 
   const rows = await db
     .select({ sale: sales, productInternalCode: products.internalCode })
@@ -242,11 +247,12 @@ export async function updateSale(
 
 // ---- Agregações para o dashboard ----
 
-export async function getSalesForRange(from?: string, to?: string, productId?: string) {
+export async function getSalesForRange(from?: string, to?: string, productId?: string, mlSellerId?: string) {
   const conditions = [];
   if (from) conditions.push(gte(sales.saleDate, from));
   if (to) conditions.push(lte(sales.saleDate, to));
   if (productId) conditions.push(eq(sales.productId, productId));
+  if (mlSellerId) conditions.push(eq(sales.mlSellerId, mlSellerId));
 
   const rows = await db
     .select({ sale: sales, productInternalCode: products.internalCode })
@@ -280,8 +286,11 @@ export interface AdTitleSummary {
  * faz esse papel na tela de produtos (mesma lógica usada em "anúncios mais
  * vendidos" no dashboard).
  */
-export async function listAdTitleSummaries(): Promise<AdTitleSummary[]> {
-  const rows = await db.select().from(sales).where(eq(sales.source, "mercadolivre"));
+export async function listAdTitleSummaries(mlSellerId?: string): Promise<AdTitleSummary[]> {
+  const condition = mlSellerId
+    ? and(eq(sales.source, "mercadolivre"), eq(sales.mlSellerId, mlSellerId))
+    : eq(sales.source, "mercadolivre");
+  const rows = await db.select().from(sales).where(condition);
   const byTitle = new Map<string, AdTitleSummary>();
 
   for (const row of rows) {

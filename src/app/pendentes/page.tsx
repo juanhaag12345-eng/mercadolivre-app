@@ -7,6 +7,7 @@ import { listStockItemsWithStock } from "@/actions/stock";
 import { PendingSaleCard } from "@/components/pendentes/PendingSaleCard";
 import { SyncRecentOrdersButton } from "@/components/pendentes/SyncRecentOrdersButton";
 import { RemoveMlAccountButton } from "@/components/pendentes/RemoveMlAccountButton";
+import { AccountFilterBar } from "@/components/shared/AccountFilterBar";
 import { formatDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -20,10 +21,11 @@ export default async function PendentesPage(props: PageProps<"/pendentes">) {
   const searchParams = await props.searchParams;
   const conectado = searchParams.ml_conectado === "1";
   const erro = typeof searchParams.ml_erro === "string" ? searchParams.ml_erro : undefined;
+  const mlSellerId = typeof searchParams.conta === "string" && searchParams.conta ? searchParams.conta : undefined;
 
   const [connections, pendingSales, stockItems] = await Promise.all([
     listConnections(),
-    listPendingSales(),
+    listPendingSales(mlSellerId),
     listStockItemsWithStock({ onlyActive: true }),
   ]);
 
@@ -107,6 +109,8 @@ export default async function PendentesPage(props: PageProps<"/pendentes">) {
           </LinkButton>
         )}
       </div>
+
+      <AccountFilterBar connections={connections} current={mlSellerId} action="/pendentes" />
 
       {stockItems.length === 0 && pendingSales.length > 0 && (
         <div className="mb-6 flex items-center gap-2 rounded-xl bg-warning-soft px-4 py-3 text-sm text-warning">

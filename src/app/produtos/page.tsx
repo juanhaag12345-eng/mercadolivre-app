@@ -2,7 +2,9 @@ import Link from "next/link";
 import { Plus, Package, PackageX, CheckCircle2, ShoppingBag } from "lucide-react";
 import { listProducts } from "@/actions/products";
 import { listAdTitleSummaries } from "@/actions/sales";
+import { listConnections } from "@/actions/mercadolivre";
 import { ProductSearchBar } from "@/components/products/ProductSearchBar";
+import { AccountFilterBar } from "@/components/shared/AccountFilterBar";
 import { Badge, Card } from "@/components/ui/Card";
 import { LinkButton } from "@/components/ui/Button";
 import { calculateFinancials, toNumber } from "@/lib/calculations";
@@ -16,8 +18,13 @@ export default async function ProdutosPage(props: PageProps<"/produtos">) {
   const criado = typeof searchParams.criado === "string" ? searchParams.criado : undefined;
   const atualizado = typeof searchParams.atualizado === "string" ? searchParams.atualizado : undefined;
   const excluido = searchParams.excluido === "1";
+  const mlSellerId = typeof searchParams.conta === "string" && searchParams.conta ? searchParams.conta : undefined;
 
-  const [productList, adTitles] = await Promise.all([listProducts(q), listAdTitleSummaries()]);
+  const [productList, adTitles, connections] = await Promise.all([
+    listProducts(q),
+    listAdTitleSummaries(mlSellerId),
+    listConnections(),
+  ]);
   const filteredAdTitles = q
     ? adTitles.filter((a) => a.title.toLowerCase().includes(q.toLowerCase()))
     : adTitles;
@@ -125,6 +132,8 @@ export default async function ProdutosPage(props: PageProps<"/produtos">) {
           </p>
         </div>
       </div>
+
+      <AccountFilterBar connections={connections} current={mlSellerId} action="/produtos" />
 
       {filteredAdTitles.length === 0 ? (
         <Card className="flex flex-col items-center justify-center py-12 text-center">
