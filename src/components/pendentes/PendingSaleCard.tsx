@@ -10,12 +10,9 @@ import { confirmPendingSale, ignorePendingSale } from "@/actions/mercadolivre";
 import { NOVO_PRODUTO_SENTINEL } from "@/lib/stock-matching";
 import type { StockItemRow } from "@/actions/stock";
 import { formatCurrency, formatDate, formatPercent, formatTime } from "@/lib/format";
+import { toSaoPauloDateISO } from "@/lib/dates";
 import { DISPATCHER_LABELS, DISPATCHERS, type PendingSale } from "@/db/schema";
 import type { ActionResult } from "@/actions/products";
-
-function toDateInputValue(date: Date): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(date);
-}
 
 export function PendingSaleCard({
   pending,
@@ -167,7 +164,7 @@ export function PendingSaleCard({
           />
         </div>
 
-        <input type="hidden" name="saleDate" value={toDateInputValue(orderDateObj)} />
+        <input type="hidden" name="saleDate" value={toSaoPauloDateISO(orderDateObj)} />
 
         {errors.form && <p className="text-sm text-danger">{errors.form}</p>}
 

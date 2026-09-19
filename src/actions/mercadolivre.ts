@@ -1,12 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, desc } from "drizzle-orm";
 import { db } from "@/db";
-import { pendingSales, sales, stockItems } from "@/db/schema";
+import { adTitleMappings, pendingSales, sales, stockItems, type Dispatcher } from "@/db/schema";
 import { confirmPendingSaleSchema } from "@/lib/validations";
 import { normalizeName, NOVO_PRODUTO_SENTINEL } from "@/lib/stock-matching";
-import { getSettings } from "@/actions/settings";
+import { createSaleFromPendingSale } from "@/lib/pending-sale-confirmation";
+import { withFinancials } from "@/lib/sale-financials";
 import {
   listConnections,
   getValidAccessTokenForAccount,
@@ -18,24 +19,6 @@ import {
 import type { ActionResult } from "@/actions/products";
 
 export { listConnections };
-
-/**
- * Extrai o ID do primeiro pagamento do payload bruto do pedido (salvo em
- * pending_sales.raw_order_payload), pra guardar em sales.mlPaymentId — é por
- * esse ID, não pelo order_id, que dá pra consultar a liberação do dinheiro
- * em GET /v1/payments/$id (ver actions/liberacoes.ts). Não faz uma chamada
- * nova à API: o payload do pedido já tem esse dado desde que foi
- * sincronizado/recebido pelo webhook.
- */
-function extractFirstPaymentId(rawOrderPayload: unknown): string | null {
-  if (!rawOrderPayload || typeof rawOrderPayload !== "object") return null;
-  const payments = (rawOrderPayload as { payments?: unknown }).payments;
-  if (!Array.isArray(payments) || payments.length === 0) return null;
-  const first = payments[0];
-  if (!first || typeof first !== "object") return null;
-  const id = (first as { id?: unknown }).id;
-  return id !== undefined && id !== null ? String(id) : null;
-}
 
 /**
  * Busca manualmente os pedidos mais recentes de UMA conta específica direto
@@ -184,63 +167,29 @@ export async function confirmPendingSale(
     }
   }
 
-  const partnerSettings = await getSettings();
-  const productCostManual = values.productCostManual.toFixed(2);
+  await createSaleFromPendingSale({
+    pending,
+    stockItemId: resolvedStockItemId,
+    quantity: values.quantity,
+    saleDate: values.saleDate,
+    dispatchedBy: values.dispatchedBy as Dispatcher,
+    productCostManual: values.productCostManual,
+    autoConfirmed: false,
+    dispatchedByConfirmed: true,
+  });
 
-  const [createdSale] = await db
-    .insert(sales)
-    .values({
-      productId: null,
-      source: "mercadolivre",
-      productNameSnapshot: pending.titleSnapshot,
-      mlOrderId: pending.mlOrderId,
-      mlSellerId: pending.mlSellerId,
-      mlPaymentId: extractFirstPaymentId(pending.rawOrderPayload),
-      mlPackId: pending.mlPackId,
-      stockItemId: resolvedStockItemId,
-      buyerNickname: pending.buyerNickname,
-      buyerFullName: pending.buyerFullName,
-      quantity: values.quantity,
-      saleDate: values.saleDate,
-      // Entra sempre como "pendente" — quem confirma a entrada em Pendentes
-      // não é necessariamente quem despacha o pacote, então o Juan ou o Djow
-      // marcam "despachado" manualmente em /vendas quando isso realmente
-      // acontecer (ver updateSaleStatus em actions/sales.ts).
-      orderStatus: "pendente",
-      dispatchedBy: values.dispatchedBy,
-      operationalFeePercentSnapshot: partnerSettings.operationalFeePercent.toString(),
-      reservePercentSnapshot: partnerSettings.reservePercent.toString(),
-      donationPercentSnapshot: partnerSettings.donationPercent.toString(),
-      notes: `Importado do Mercado Livre — pedido ${pending.mlOrderId}.`,
-      // Colunas do "modelo de receita" antigo (produto cadastrado) não se
-      // aplicam a uma venda do Mercado Livre — preenchidas com valores
-      // neutros só para satisfazer as colunas NOT NULL; withFinancials()
-      // ignora todas elas quando source = "mercadolivre" e usa os valores
-      // reais abaixo em vez disso.
-      unitPriceSnapshot: pending.unitPriceSnapshot,
-      kitQuantitySnapshot: 1,
-      saleFeeTypeSnapshot: "fixo",
-      saleFeeValueSnapshot: "0",
-      freeShippingSnapshot: false,
-      shippingCostSnapshot: "0",
-      packagingCostSnapshot: "0",
-      productCostSnapshot: "0",
-      mlSaleFeeTotalSnapshot: pending.mlSaleFeeSnapshot,
-      mlShippingTotalSnapshot: pending.mlShippingCostSnapshot,
-      productCostManualSnapshot: productCostManual,
-    })
-    .returning({ id: sales.id });
-
+  // Memoriza (ou corrige, se a pessoa escolheu um produto diferente dessa
+  // vez) o vínculo "esse título de anúncio → esse produto de estoque" — é
+  // isso que permite confirmar sozinhas as próximas vendas do MESMO anúncio
+  // (ver tryAutoConfirmPendingSale, em lib/mercadolivre.ts). Nunca cria
+  // vínculo por adivinhação, só quando uma pessoa confirma manualmente.
   await db
-    .update(pendingSales)
-    .set({
-      status: "confirmada",
-      dispatchedBy: values.dispatchedBy,
-      productCostManual,
-      resultingSaleId: createdSale.id,
-      updatedAt: new Date(),
-    })
-    .where(eq(pendingSales.id, pendingSaleId));
+    .insert(adTitleMappings)
+    .values({ adTitle: pending.titleSnapshot, stockItemId: resolvedStockItemId })
+    .onConflictDoUpdate({
+      target: adTitleMappings.adTitle,
+      set: { stockItemId: resolvedStockItemId, updatedAt: new Date() },
+    });
 
   revalidatePath("/pendentes");
   revalidatePath("/vendas");
@@ -257,5 +206,88 @@ export async function ignorePendingSale(pendingSaleId: string) {
     .update(pendingSales)
     .set({ status: "ignorada", updatedAt: new Date() })
     .where(eq(pendingSales.id, pendingSaleId));
+  revalidatePath("/pendentes");
+}
+
+// ---- Confirmação automática por anúncio já mapeado ----
+
+export type AutoConfirmedSaleRow = ReturnType<typeof withFinancials> & {
+  stockItemName: string | null;
+  stockItemInternalCode: number | null;
+};
+
+/**
+ * Últimas vendas confirmadas sozinhas pelo sistema (sem passar por revisão
+ * manual em Pendentes) — pra conferência em /pendentes. Não filtra por
+ * `dispatchedByConfirmed`: mostra tanto as que ainda precisam que alguém
+ * escolha quem despachou quanto as já corrigidas, pra servir de histórico.
+ */
+export async function listAutoConfirmedSales(limit = 30): Promise<AutoConfirmedSaleRow[]> {
+  const rows = await db
+    .select({ sale: sales, stockItemName: stockItems.name, stockItemInternalCode: stockItems.internalCode })
+    .from(sales)
+    .leftJoin(stockItems, eq(sales.stockItemId, stockItems.id))
+    .where(eq(sales.autoConfirmed, true))
+    .orderBy(desc(sales.createdAt))
+    .limit(limit);
+  return rows.map((row) => ({
+    ...withFinancials(row.sale),
+    stockItemName: row.stockItemName,
+    stockItemInternalCode: row.stockItemInternalCode,
+  }));
+}
+
+/**
+ * Preenche quem despachou de verdade uma venda que entrou sozinha (ver
+ * autoConfirmed/dispatchedByConfirmed em schema.ts) — até isso ser chamado,
+ * dispatchedBy tem um valor provisório que já vale pro rateio operacional de
+ * 5%, então essa correção é o que garante que o Juan/Djow certo recebe.
+ */
+export async function setDispatchedByForAutoConfirmedSale(saleId: string, dispatchedBy: Dispatcher) {
+  await db
+    .update(sales)
+    .set({ dispatchedBy, dispatchedByConfirmed: true, updatedAt: new Date() })
+    .where(eq(sales.id, saleId));
+  revalidatePath("/pendentes");
+  revalidatePath("/vendas");
+  revalidatePath("/");
+}
+
+// ---- Gerenciar vínculos "anúncio → produto" memorizados ----
+
+export interface AdTitleMappingRow {
+  id: string;
+  adTitle: string;
+  stockItemId: string;
+  stockItemName: string;
+  stockItemInternalCode: number;
+  updatedAt: Date;
+}
+
+/** Todos os vínculos memorizados, mais recentemente atualizados primeiro — pra revisar/corrigir em /pendentes. */
+export async function listAdTitleMappings(): Promise<AdTitleMappingRow[]> {
+  return db
+    .select({
+      id: adTitleMappings.id,
+      adTitle: adTitleMappings.adTitle,
+      stockItemId: adTitleMappings.stockItemId,
+      stockItemName: stockItems.name,
+      stockItemInternalCode: stockItems.internalCode,
+      updatedAt: adTitleMappings.updatedAt,
+    })
+    .from(adTitleMappings)
+    .innerJoin(stockItems, eq(adTitleMappings.stockItemId, stockItems.id))
+    .orderBy(desc(adTitleMappings.updatedAt));
+}
+
+/** Corrige manualmente pra qual produto um anúncio aponta — não mexe em vendas já confirmadas com o vínculo antigo, só nas próximas. */
+export async function updateAdTitleMapping(id: string, stockItemId: string) {
+  await db.update(adTitleMappings).set({ stockItemId, updatedAt: new Date() }).where(eq(adTitleMappings.id, id));
+  revalidatePath("/pendentes");
+}
+
+/** Remove o vínculo — a próxima venda desse anúncio volta a cair em Pendentes pra escolha manual. */
+export async function deleteAdTitleMapping(id: string) {
+  await db.delete(adTitleMappings).where(eq(adTitleMappings.id, id));
   revalidatePath("/pendentes");
 }

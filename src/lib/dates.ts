@@ -33,6 +33,17 @@ export function addDays(dateISO: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+/**
+ * Converte um instante (Date) pra data ISO (AAAA-MM-DD) no fuso de
+ * São Paulo — usado pra transformar `orderDate`/`pending.orderDate` (um
+ * timestamp) na data "do dia" que preenche `sales.saleDate`, tanto na
+ * confirmação manual (PendingSaleCard) quanto na automática
+ * (tryAutoConfirmPendingSale) — as duas precisam bater exatamente.
+ */
+export function toSaoPauloDateISO(date: Date): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(date);
+}
+
 /** Quantidade de dias entre duas datas ISO, incluindo os dois extremos. */
 export function daysBetweenInclusive(from: string, to: string): number {
   const [y1, m1, d1] = from.split("-").map(Number);

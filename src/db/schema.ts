@@ -299,6 +299,19 @@ export const sales = pgTable(
     dispatchedBy: text("dispatched_by", { enum: DISPATCHERS })
       .notNull()
       .default("juan"),
+    // true quando essa venda foi confirmada sozinha pelo sistema (a partir de
+    // um vínculo anúncio→produto já memorizado em ad_title_mappings), sem
+    // ninguém olhar em Pendentes — usado pra listar "confirmadas
+    // automaticamente" em /pendentes pra conferência. false = confirmada
+    // manualmente (fluxo de sempre).
+    autoConfirmed: boolean("auto_confirmed").notNull().default(false),
+    // Numa confirmação automática não tem como saber quem realmente vai
+    // despachar o pacote — dispatchedBy acima entra com um valor provisório
+    // (ATENÇÃO: entra valendo pro rateio operacional de 5% até ser corrigido)
+    // e essa coluna fica false até alguém escolher de verdade na lista de
+    // "confirmadas automaticamente" em /pendentes. Confirmação manual sempre
+    // grava true, porque a pessoa já escolhe quem despachou na hora.
+    dispatchedByConfirmed: boolean("dispatched_by_confirmed").notNull().default(true),
 
     // --- Snapshot da divisão de lucro vigente no momento da venda ---
     // Guardamos os percentuais usados (e não só o valor calculado) para que
@@ -585,6 +598,34 @@ export const pendingSales = pgTable(
   ]
 );
 
+// Vínculo memorizado "título do anúncio → produto de estoque", usado pra
+// confirmar sozinha (sem passar por revisão manual em Pendentes) uma venda
+// nova cujo anúncio já apareceu antes. Só é criado/atualizado quando uma
+// PESSOA confirma manualmente uma venda pendente daquele título — nunca por
+// adivinhação de texto (ver comentário em tryAutoConfirmPendingSale, em
+// lib/mercadolivre.ts) — então o pior caso é repetir uma escolha que o Juan
+// ou o Djow já fizeram antes, nunca inventar uma nova. Confirmar de novo,
+// manualmente, uma venda do mesmo título com um produto diferente substitui
+// o vínculo (corrige um mapeamento errado pra frente, sem mexer em vendas
+// já lançadas).
+export const adTitleMappings = pgTable(
+  "ad_title_mappings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    adTitle: text("ad_title").notNull(),
+    stockItemId: uuid("stock_item_id")
+      .notNull()
+      .references(() => stockItems.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [unique("ad_title_mappings_ad_title_unique").on(table.adTitle)]
+);
+
 // Conta de e-mail (Gmail) conectada para varredura automática de NF-e de
 // fornecedores. Cada conta guarda seu próprio par de tokens OAuth — permite
 // conectar as contas do Juan, do Djow e de mais e-mails no futuro, cada uma
@@ -684,3 +725,4 @@ export type NfeEmailAccount = typeof nfeEmailAccounts.$inferSelect;
 export type NfePendente = typeof nfePendentes.$inferSelect;
 export type StockItem = typeof stockItems.$inferSelect;
 export type StockPurchase = typeof stockPurchases.$inferSelect;
+export type AdTitleMapping = typeof adTitleMappings.$inferSelect;

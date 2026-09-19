@@ -1,0 +1,2475 @@
+From 74ded62e486484d1da6e26a2da32ed9f23993cba Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 19 Sep 2026 15:23:11 +0000
+Subject: [PATCH] Automatiza confirmacao de vendas pendentes por anuncio ja
+ mapeado
+
+Memoriza o produto escolhido na primeira confirmacao manual de cada
+anuncio (ad_title_mappings). Quando uma nova venda chega com o mesmo
+titulo de anuncio e o produto vinculado tem custo de referencia
+cadastrado, ela entra sozinha no dashboard com o custo e a baixa de
+estoque corretos, sem repetir texto/IA - so titulo identico ja
+confirmado manualmente antes.
+
+Adiciona lista "Confirmadas automaticamente" em /pendentes para
+conferencia e selecao de quem despachou (nao da pra saber isso
+sozinho), e painel "Vinculos automaticos" para corrigir ou remover um
+mapeamento anuncio->produto errado.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01XMEGmEZJKrP9iQh6tMa7zu
+---
+ ...020_ad_title_mappings_and_auto_confirm.sql |   12 +
+ drizzle/meta/0020_snapshot.json               | 1496 +++++++++++++++++
+ drizzle/meta/_journal.json                    |    7 +
+ src/actions/mercadolivre.ts                   |  184 +-
+ src/app/pendentes/page.tsx                    |   20 +-
+ .../pendentes/AdTitleMappingsPanel.tsx        |  146 ++
+ .../pendentes/AutoConfirmedSalesList.tsx      |  112 ++
+ src/components/pendentes/PendingSaleCard.tsx  |    7 +-
+ src/db/schema.ts                              |   42 +
+ src/lib/dates.ts                              |   11 +
+ src/lib/mercadolivre.ts                       |   84 +-
+ src/lib/pending-sale-confirmation.ts          |  121 ++
+ 12 files changed, 2157 insertions(+), 85 deletions(-)
+ create mode 100644 drizzle/0020_ad_title_mappings_and_auto_confirm.sql
+ create mode 100644 drizzle/meta/0020_snapshot.json
+ create mode 100644 src/components/pendentes/AdTitleMappingsPanel.tsx
+ create mode 100644 src/components/pendentes/AutoConfirmedSalesList.tsx
+ create mode 100644 src/lib/pending-sale-confirmation.ts
+
+diff --git a/drizzle/0020_ad_title_mappings_and_auto_confirm.sql b/drizzle/0020_ad_title_mappings_and_auto_confirm.sql
+new file mode 100644
+index 0000000..f7c0218
+--- /dev/null
++++ b/drizzle/0020_ad_title_mappings_and_auto_confirm.sql
+@@ -0,0 +1,12 @@
++CREATE TABLE "ad_title_mappings" (
++	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
++	"ad_title" text NOT NULL,
++	"stock_item_id" uuid NOT NULL,
++	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
++	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
++	CONSTRAINT "ad_title_mappings_ad_title_unique" UNIQUE("ad_title")
++);
++--> statement-breakpoint
++ALTER TABLE "sales" ADD COLUMN "auto_confirmed" boolean DEFAULT false NOT NULL;--> statement-breakpoint
++ALTER TABLE "sales" ADD COLUMN "dispatched_by_confirmed" boolean DEFAULT true NOT NULL;--> statement-breakpoint
++ALTER TABLE "ad_title_mappings" ADD CONSTRAINT "ad_title_mappings_stock_item_id_stock_items_id_fk" FOREIGN KEY ("stock_item_id") REFERENCES "public"."stock_items"("id") ON DELETE cascade ON UPDATE no action;
+\ No newline at end of file
+diff --git a/drizzle/meta/0020_snapshot.json b/drizzle/meta/0020_snapshot.json
+new file mode 100644
+index 0000000..72f0381
+--- /dev/null
++++ b/drizzle/meta/0020_snapshot.json
+@@ -0,0 +1,1496 @@
++{
++  "id": "2efc5d77-1db8-4158-90fb-128fb1a8a652",
++  "prevId": "421764f5-022e-41b7-833c-b39693333979",
++  "version": "7",
++  "dialect": "postgresql",
++  "tables": {
++    "public.ad_title_mappings": {
++      "name": "ad_title_mappings",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "ad_title": {
++          "name": "ad_title",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "stock_item_id": {
++          "name": "stock_item_id",
++          "type": "uuid",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {},
++      "foreignKeys": {
++        "ad_title_mappings_stock_item_id_stock_items_id_fk": {
++          "name": "ad_title_mappings_stock_item_id_stock_items_id_fk",
++          "tableFrom": "ad_title_mappings",
++          "tableTo": "stock_items",
++          "columnsFrom": [
++            "stock_item_id"
++          ],
++          "columnsTo": [
++            "id"
++          ],
++          "onDelete": "cascade",
++          "onUpdate": "no action"
++        }
++      },
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "ad_title_mappings_ad_title_unique": {
++          "name": "ad_title_mappings_ad_title_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "ad_title"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.mercadolivre_credentials": {
++      "name": "mercadolivre_credentials",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "ml_user_id": {
++          "name": "ml_user_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "nickname": {
++          "name": "nickname",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "access_token": {
++          "name": "access_token",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "refresh_token": {
++          "name": "refresh_token",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "expires_at": {
++          "name": "expires_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "scope": {
++          "name": "scope",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {},
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "mercadolivre_credentials_ml_user_id_unique": {
++          "name": "mercadolivre_credentials_ml_user_id_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "ml_user_id"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.monthly_goals": {
++      "name": "monthly_goals",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "year_month": {
++          "name": "year_month",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "goal_value": {
++          "name": "goal_value",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {},
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "monthly_goals_year_month_unique": {
++          "name": "monthly_goals_year_month_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "year_month"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.nfe_email_accounts": {
++      "name": "nfe_email_accounts",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "email": {
++          "name": "email",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "access_token": {
++          "name": "access_token",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "refresh_token": {
++          "name": "refresh_token",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "expires_at": {
++          "name": "expires_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "scope": {
++          "name": "scope",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "last_scanned_at": {
++          "name": "last_scanned_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "last_scan_error": {
++          "name": "last_scan_error",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {},
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "nfe_email_accounts_email_unique": {
++          "name": "nfe_email_accounts_email_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "email"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.nfe_pendentes": {
++      "name": "nfe_pendentes",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "email_account_id": {
++          "name": "email_account_id",
++          "type": "uuid",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "gmail_message_id": {
++          "name": "gmail_message_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "fornecedor_cnpj": {
++          "name": "fornecedor_cnpj",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "fornecedor_nome": {
++          "name": "fornecedor_nome",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "numero_nota": {
++          "name": "numero_nota",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "serie_nota": {
++          "name": "serie_nota",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "data_emissao": {
++          "name": "data_emissao",
++          "type": "date",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "valor_total": {
++          "name": "valor_total",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "forma_pagamento_sugerida": {
++          "name": "forma_pagamento_sugerida",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "itens": {
++          "name": "itens",
++          "type": "jsonb",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "xml_conteudo": {
++          "name": "xml_conteudo",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "status": {
++          "name": "status",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'pendente'"
++        },
++        "erro": {
++          "name": "erro",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "recebida_em": {
++          "name": "recebida_em",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "processada_em": {
++          "name": "processada_em",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": false
++        }
++      },
++      "indexes": {
++        "nfe_pendentes_status_idx": {
++          "name": "nfe_pendentes_status_idx",
++          "columns": [
++            {
++              "expression": "status",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        }
++      },
++      "foreignKeys": {
++        "nfe_pendentes_email_account_id_nfe_email_accounts_id_fk": {
++          "name": "nfe_pendentes_email_account_id_nfe_email_accounts_id_fk",
++          "tableFrom": "nfe_pendentes",
++          "tableTo": "nfe_email_accounts",
++          "columnsFrom": [
++            "email_account_id"
++          ],
++          "columnsTo": [
++            "id"
++          ],
++          "onDelete": "cascade",
++          "onUpdate": "no action"
++        }
++      },
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "nfe_pendentes_gmail_message_id_unique": {
++          "name": "nfe_pendentes_gmail_message_id_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "gmail_message_id"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.pending_sales": {
++      "name": "pending_sales",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "ml_order_id": {
++          "name": "ml_order_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_order_item_id": {
++          "name": "ml_order_item_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_seller_id": {
++          "name": "ml_seller_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_pack_id": {
++          "name": "ml_pack_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "title_snapshot": {
++          "name": "title_snapshot",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "quantity": {
++          "name": "quantity",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true,
++          "default": 1
++        },
++        "unit_price_snapshot": {
++          "name": "unit_price_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_sale_fee_snapshot": {
++          "name": "ml_sale_fee_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_shipping_cost_snapshot": {
++          "name": "ml_shipping_cost_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "order_date": {
++          "name": "order_date",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "order_status_ml": {
++          "name": "order_status_ml",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "buyer_nickname": {
++          "name": "buyer_nickname",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "buyer_full_name": {
++          "name": "buyer_full_name",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "raw_order_payload": {
++          "name": "raw_order_payload",
++          "type": "jsonb",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "status": {
++          "name": "status",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'pendente'"
++        },
++        "matched_product_id": {
++          "name": "matched_product_id",
++          "type": "uuid",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "product_cost_manual": {
++          "name": "product_cost_manual",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "dispatched_by": {
++          "name": "dispatched_by",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "resulting_sale_id": {
++          "name": "resulting_sale_id",
++          "type": "uuid",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {
++        "pending_sales_status_idx": {
++          "name": "pending_sales_status_idx",
++          "columns": [
++            {
++              "expression": "status",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        }
++      },
++      "foreignKeys": {
++        "pending_sales_matched_product_id_products_id_fk": {
++          "name": "pending_sales_matched_product_id_products_id_fk",
++          "tableFrom": "pending_sales",
++          "tableTo": "products",
++          "columnsFrom": [
++            "matched_product_id"
++          ],
++          "columnsTo": [
++            "id"
++          ],
++          "onDelete": "set null",
++          "onUpdate": "no action"
++        },
++        "pending_sales_resulting_sale_id_sales_id_fk": {
++          "name": "pending_sales_resulting_sale_id_sales_id_fk",
++          "tableFrom": "pending_sales",
++          "tableTo": "sales",
++          "columnsFrom": [
++            "resulting_sale_id"
++          ],
++          "columnsTo": [
++            "id"
++          ],
++          "onDelete": "set null",
++          "onUpdate": "no action"
++        }
++      },
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "pending_sales_order_item_unique": {
++          "name": "pending_sales_order_item_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "ml_order_id",
++            "ml_order_item_id"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.products": {
++      "name": "products",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "internal_code": {
++          "name": "internal_code",
++          "type": "serial",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "name": {
++          "name": "name",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "image_url": {
++          "name": "image_url",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "is_kit": {
++          "name": "is_kit",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true,
++          "default": false
++        },
++        "kit_quantity": {
++          "name": "kit_quantity",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true,
++          "default": 1
++        },
++        "unit_price": {
++          "name": "unit_price",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "sale_fee_type": {
++          "name": "sale_fee_type",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'percentual'"
++        },
++        "sale_fee_value": {
++          "name": "sale_fee_value",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "free_shipping": {
++          "name": "free_shipping",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true,
++          "default": false
++        },
++        "shipping_cost": {
++          "name": "shipping_cost",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "packaging_cost": {
++          "name": "packaging_cost",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "product_cost": {
++          "name": "product_cost",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'0'"
++        },
++        "active": {
++          "name": "active",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true,
++          "default": true
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {
++        "products_name_idx": {
++          "name": "products_name_idx",
++          "columns": [
++            {
++              "expression": "name",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        }
++      },
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "products_internal_code_unique": {
++          "name": "products_internal_code_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "internal_code"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.sales": {
++      "name": "sales",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "product_id": {
++          "name": "product_id",
++          "type": "uuid",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "source": {
++          "name": "source",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'manual'"
++        },
++        "product_name_snapshot": {
++          "name": "product_name_snapshot",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_order_id": {
++          "name": "ml_order_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_pack_id": {
++          "name": "ml_pack_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_payment_id": {
++          "name": "ml_payment_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "buyer_nickname": {
++          "name": "buyer_nickname",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "buyer_full_name": {
++          "name": "buyer_full_name",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "quantity": {
++          "name": "quantity",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true,
++          "default": 1
++        },
++        "sale_date": {
++          "name": "sale_date",
++          "type": "date",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "order_status": {
++          "name": "order_status",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'pendente'"
++        },
++        "notes": {
++          "name": "notes",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "dispatched_by": {
++          "name": "dispatched_by",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'juan'"
++        },
++        "auto_confirmed": {
++          "name": "auto_confirmed",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true,
++          "default": false
++        },
++        "dispatched_by_confirmed": {
++          "name": "dispatched_by_confirmed",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true,
++          "default": true
++        },
++        "operational_fee_percent_snapshot": {
++          "name": "operational_fee_percent_snapshot",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'5'"
++        },
++        "reserve_percent_snapshot": {
++          "name": "reserve_percent_snapshot",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'30'"
++        },
++        "donation_percent_snapshot": {
++          "name": "donation_percent_snapshot",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'10'"
++        },
++        "unit_price_snapshot": {
++          "name": "unit_price_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "kit_quantity_snapshot": {
++          "name": "kit_quantity_snapshot",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "sale_fee_type_snapshot": {
++          "name": "sale_fee_type_snapshot",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "sale_fee_value_snapshot": {
++          "name": "sale_fee_value_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "free_shipping_snapshot": {
++          "name": "free_shipping_snapshot",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "shipping_cost_snapshot": {
++          "name": "shipping_cost_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "packaging_cost_snapshot": {
++          "name": "packaging_cost_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "product_cost_snapshot": {
++          "name": "product_cost_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ml_sale_fee_total_snapshot": {
++          "name": "ml_sale_fee_total_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_shipping_total_snapshot": {
++          "name": "ml_shipping_total_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "product_cost_manual_snapshot": {
++          "name": "product_cost_manual_snapshot",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ml_seller_id": {
++          "name": "ml_seller_id",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "stock_item_id": {
++          "name": "stock_item_id",
++          "type": "uuid",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "money_release_date": {
++          "name": "money_release_date",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "money_release_status": {
++          "name": "money_release_status",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "money_release_checked_at": {
++          "name": "money_release_checked_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {
++        "sales_product_id_idx": {
++          "name": "sales_product_id_idx",
++          "columns": [
++            {
++              "expression": "product_id",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        },
++        "sales_sale_date_idx": {
++          "name": "sales_sale_date_idx",
++          "columns": [
++            {
++              "expression": "sale_date",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        },
++        "sales_order_status_idx": {
++          "name": "sales_order_status_idx",
++          "columns": [
++            {
++              "expression": "order_status",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        },
++        "sales_money_release_status_idx": {
++          "name": "sales_money_release_status_idx",
++          "columns": [
++            {
++              "expression": "money_release_status",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        },
++        "sales_stock_item_id_idx": {
++          "name": "sales_stock_item_id_idx",
++          "columns": [
++            {
++              "expression": "stock_item_id",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        }
++      },
++      "foreignKeys": {
++        "sales_product_id_products_id_fk": {
++          "name": "sales_product_id_products_id_fk",
++          "tableFrom": "sales",
++          "tableTo": "products",
++          "columnsFrom": [
++            "product_id"
++          ],
++          "columnsTo": [
++            "id"
++          ],
++          "onDelete": "set null",
++          "onUpdate": "no action"
++        },
++        "sales_stock_item_id_stock_items_id_fk": {
++          "name": "sales_stock_item_id_stock_items_id_fk",
++          "tableFrom": "sales",
++          "tableTo": "stock_items",
++          "columnsFrom": [
++            "stock_item_id"
++          ],
++          "columnsTo": [
++            "id"
++          ],
++          "onDelete": "set null",
++          "onUpdate": "no action"
++        }
++      },
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {},
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.settings": {
++      "name": "settings",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "text",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "'default'"
++        },
++        "operational_fee_percent": {
++          "name": "operational_fee_percent",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'5'"
++        },
++        "reserve_percent": {
++          "name": "reserve_percent",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'30'"
++        },
++        "donation_percent": {
++          "name": "donation_percent",
++          "type": "numeric(5, 2)",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'10'"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {},
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {},
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.stock_items": {
++      "name": "stock_items",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "internal_code": {
++          "name": "internal_code",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "name": {
++          "name": "name",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "ean": {
++          "name": "ean",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "min_stock": {
++          "name": "min_stock",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true,
++          "default": 0
++        },
++        "sale_unit_type": {
++          "name": "sale_unit_type",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'unitario'"
++        },
++        "units_per_package": {
++          "name": "units_per_package",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true,
++          "default": 1
++        },
++        "reference_cost_price": {
++          "name": "reference_cost_price",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "criado_automaticamente": {
++          "name": "criado_automaticamente",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true,
++          "default": false
++        },
++        "active": {
++          "name": "active",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true,
++          "default": true
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {
++        "stock_items_name_idx": {
++          "name": "stock_items_name_idx",
++          "columns": [
++            {
++              "expression": "name",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        }
++      },
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "stock_items_internal_code_unique": {
++          "name": "stock_items_internal_code_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "internal_code"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.stock_purchases": {
++      "name": "stock_purchases",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "uuid",
++          "primaryKey": true,
++          "notNull": true,
++          "default": "gen_random_uuid()"
++        },
++        "stock_item_id": {
++          "name": "stock_item_id",
++          "type": "uuid",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "purchase_date": {
++          "name": "purchase_date",
++          "type": "date",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "supplier": {
++          "name": "supplier",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "unit_cost": {
++          "name": "unit_cost",
++          "type": "numeric(12, 2)",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "quantity": {
++          "name": "quantity",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "payment_method": {
++          "name": "payment_method",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "origem": {
++          "name": "origem",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'sem_nf'"
++        },
++        "nota_fiscal_numero": {
++          "name": "nota_fiscal_numero",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "nfe_pendente_id": {
++          "name": "nfe_pendente_id",
++          "type": "uuid",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "produto_novo": {
++          "name": "produto_novo",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": true,
++          "default": false
++        },
++        "payment_term_days": {
++          "name": "payment_term_days",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true,
++          "default": 0
++        },
++        "due_date": {
++          "name": "due_date",
++          "type": "date",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "payment_status": {
++          "name": "payment_status",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'pendente'"
++        },
++        "paid_at": {
++          "name": "paid_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "observacao": {
++          "name": "observacao",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp with time zone",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        }
++      },
++      "indexes": {
++        "stock_purchases_item_idx": {
++          "name": "stock_purchases_item_idx",
++          "columns": [
++            {
++              "expression": "stock_item_id",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        },
++        "stock_purchases_payment_status_idx": {
++          "name": "stock_purchases_payment_status_idx",
++          "columns": [
++            {
++              "expression": "payment_status",
++              "isExpression": false,
++              "asc": true,
++              "nulls": "last"
++            }
++          ],
++          "isUnique": false,
++          "concurrently": false,
++          "method": "btree",
++          "with": {}
++        }
++      },
++      "foreignKeys": {
++        "stock_purchases_stock_item_id_stock_items_id_fk": {
++          "name": "stock_purchases_stock_item_id_stock_items_id_fk",
++          "tableFrom": "stock_purchases",
++          "tableTo": "stock_items",
++          "columnsFrom": [
++            "stock_item_id"
++          ],
++          "columnsTo": [
++            "id"
++          ],
++          "onDelete": "restrict",
++          "onUpdate": "no action"
++        },
++        "stock_purchases_nfe_pendente_id_nfe_pendentes_id_fk": {
++          "name": "stock_purchases_nfe_pendente_id_nfe_pendentes_id_fk",
++          "tableFrom": "stock_purchases",
++          "tableTo": "nfe_pendentes",
++          "columnsFrom": [
++            "nfe_pendente_id"
++          ],
++          "columnsTo": [
++            "id"
++          ],
++          "onDelete": "set null",
++          "onUpdate": "no action"
++        }
++      },
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {},
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    }
++  },
++  "enums": {},
++  "schemas": {},
++  "sequences": {},
++  "roles": {},
++  "policies": {},
++  "views": {},
++  "_meta": {
++    "columns": {},
++    "schemas": {},
++    "tables": {}
++  }
++}
+\ No newline at end of file
+diff --git a/drizzle/meta/_journal.json b/drizzle/meta/_journal.json
+index d42659b..5dc8284 100755
+--- a/drizzle/meta/_journal.json
++++ b/drizzle/meta/_journal.json
+@@ -141,6 +141,13 @@
+       "when": 1789829084075,
+       "tag": "0019_stock_items_internal_code_app_managed",
+       "breakpoints": true
++    },
++    {
++      "idx": 20,
++      "version": "7",
++      "when": 1789831061095,
++      "tag": "0020_ad_title_mappings_and_auto_confirm",
++      "breakpoints": true
+     }
+   ]
+ }
+\ No newline at end of file
+diff --git a/src/actions/mercadolivre.ts b/src/actions/mercadolivre.ts
+index 93e96c0..8746b43 100644
+--- a/src/actions/mercadolivre.ts
++++ b/src/actions/mercadolivre.ts
+@@ -1,12 +1,13 @@
+ "use server";
+ 
+ import { revalidatePath } from "next/cache";
+-import { eq, and, sql } from "drizzle-orm";
++import { eq, and, sql, desc } from "drizzle-orm";
+ import { db } from "@/db";
+-import { pendingSales, sales, stockItems } from "@/db/schema";
++import { adTitleMappings, pendingSales, sales, stockItems, type Dispatcher } from "@/db/schema";
+ import { confirmPendingSaleSchema } from "@/lib/validations";
+ import { normalizeName, NOVO_PRODUTO_SENTINEL } from "@/lib/stock-matching";
+-import { getSettings } from "@/actions/settings";
++import { createSaleFromPendingSale } from "@/lib/pending-sale-confirmation";
++import { withFinancials } from "@/lib/sale-financials";
+ import {
+   listConnections,
+   getValidAccessTokenForAccount,
+@@ -19,24 +20,6 @@ import type { ActionResult } from "@/actions/products";
+ 
+ export { listConnections };
+ 
+-/**
+- * Extrai o ID do primeiro pagamento do payload bruto do pedido (salvo em
+- * pending_sales.raw_order_payload), pra guardar em sales.mlPaymentId — é por
+- * esse ID, não pelo order_id, que dá pra consultar a liberação do dinheiro
+- * em GET /v1/payments/$id (ver actions/liberacoes.ts). Não faz uma chamada
+- * nova à API: o payload do pedido já tem esse dado desde que foi
+- * sincronizado/recebido pelo webhook.
+- */
+-function extractFirstPaymentId(rawOrderPayload: unknown): string | null {
+-  if (!rawOrderPayload || typeof rawOrderPayload !== "object") return null;
+-  const payments = (rawOrderPayload as { payments?: unknown }).payments;
+-  if (!Array.isArray(payments) || payments.length === 0) return null;
+-  const first = payments[0];
+-  if (!first || typeof first !== "object") return null;
+-  const id = (first as { id?: unknown }).id;
+-  return id !== undefined && id !== null ? String(id) : null;
+-}
+-
+ /**
+  * Busca manualmente os pedidos mais recentes de UMA conta específica direto
+  * na API do Mercado Livre e atualiza /pendentes — rede de segurança para o
+@@ -184,63 +167,29 @@ export async function confirmPendingSale(
+     }
+   }
+ 
+-  const partnerSettings = await getSettings();
+-  const productCostManual = values.productCostManual.toFixed(2);
+-
+-  const [createdSale] = await db
+-    .insert(sales)
+-    .values({
+-      productId: null,
+-      source: "mercadolivre",
+-      productNameSnapshot: pending.titleSnapshot,
+-      mlOrderId: pending.mlOrderId,
+-      mlSellerId: pending.mlSellerId,
+-      mlPaymentId: extractFirstPaymentId(pending.rawOrderPayload),
+-      mlPackId: pending.mlPackId,
+-      stockItemId: resolvedStockItemId,
+-      buyerNickname: pending.buyerNickname,
+-      buyerFullName: pending.buyerFullName,
+-      quantity: values.quantity,
+-      saleDate: values.saleDate,
+-      // Entra sempre como "pendente" — quem confirma a entrada em Pendentes
+-      // não é necessariamente quem despacha o pacote, então o Juan ou o Djow
+-      // marcam "despachado" manualmente em /vendas quando isso realmente
+-      // acontecer (ver updateSaleStatus em actions/sales.ts).
+-      orderStatus: "pendente",
+-      dispatchedBy: values.dispatchedBy,
+-      operationalFeePercentSnapshot: partnerSettings.operationalFeePercent.toString(),
+-      reservePercentSnapshot: partnerSettings.reservePercent.toString(),
+-      donationPercentSnapshot: partnerSettings.donationPercent.toString(),
+-      notes: `Importado do Mercado Livre — pedido ${pending.mlOrderId}.`,
+-      // Colunas do "modelo de receita" antigo (produto cadastrado) não se
+-      // aplicam a uma venda do Mercado Livre — preenchidas com valores
+-      // neutros só para satisfazer as colunas NOT NULL; withFinancials()
+-      // ignora todas elas quando source = "mercadolivre" e usa os valores
+-      // reais abaixo em vez disso.
+-      unitPriceSnapshot: pending.unitPriceSnapshot,
+-      kitQuantitySnapshot: 1,
+-      saleFeeTypeSnapshot: "fixo",
+-      saleFeeValueSnapshot: "0",
+-      freeShippingSnapshot: false,
+-      shippingCostSnapshot: "0",
+-      packagingCostSnapshot: "0",
+-      productCostSnapshot: "0",
+-      mlSaleFeeTotalSnapshot: pending.mlSaleFeeSnapshot,
+-      mlShippingTotalSnapshot: pending.mlShippingCostSnapshot,
+-      productCostManualSnapshot: productCostManual,
+-    })
+-    .returning({ id: sales.id });
++  await createSaleFromPendingSale({
++    pending,
++    stockItemId: resolvedStockItemId,
++    quantity: values.quantity,
++    saleDate: values.saleDate,
++    dispatchedBy: values.dispatchedBy as Dispatcher,
++    productCostManual: values.productCostManual,
++    autoConfirmed: false,
++    dispatchedByConfirmed: true,
++  });
+ 
++  // Memoriza (ou corrige, se a pessoa escolheu um produto diferente dessa
++  // vez) o vínculo "esse título de anúncio → esse produto de estoque" — é
++  // isso que permite confirmar sozinhas as próximas vendas do MESMO anúncio
++  // (ver tryAutoConfirmPendingSale, em lib/mercadolivre.ts). Nunca cria
++  // vínculo por adivinhação, só quando uma pessoa confirma manualmente.
+   await db
+-    .update(pendingSales)
+-    .set({
+-      status: "confirmada",
+-      dispatchedBy: values.dispatchedBy,
+-      productCostManual,
+-      resultingSaleId: createdSale.id,
+-      updatedAt: new Date(),
+-    })
+-    .where(eq(pendingSales.id, pendingSaleId));
++    .insert(adTitleMappings)
++    .values({ adTitle: pending.titleSnapshot, stockItemId: resolvedStockItemId })
++    .onConflictDoUpdate({
++      target: adTitleMappings.adTitle,
++      set: { stockItemId: resolvedStockItemId, updatedAt: new Date() },
++    });
+ 
+   revalidatePath("/pendentes");
+   revalidatePath("/vendas");
+@@ -259,3 +208,86 @@ export async function ignorePendingSale(pendingSaleId: string) {
+     .where(eq(pendingSales.id, pendingSaleId));
+   revalidatePath("/pendentes");
+ }
++
++// ---- Confirmação automática por anúncio já mapeado ----
++
++export type AutoConfirmedSaleRow = ReturnType<typeof withFinancials> & {
++  stockItemName: string | null;
++  stockItemInternalCode: number | null;
++};
++
++/**
++ * Últimas vendas confirmadas sozinhas pelo sistema (sem passar por revisão
++ * manual em Pendentes) — pra conferência em /pendentes. Não filtra por
++ * `dispatchedByConfirmed`: mostra tanto as que ainda precisam que alguém
++ * escolha quem despachou quanto as já corrigidas, pra servir de histórico.
++ */
++export async function listAutoConfirmedSales(limit = 30): Promise<AutoConfirmedSaleRow[]> {
++  const rows = await db
++    .select({ sale: sales, stockItemName: stockItems.name, stockItemInternalCode: stockItems.internalCode })
++    .from(sales)
++    .leftJoin(stockItems, eq(sales.stockItemId, stockItems.id))
++    .where(eq(sales.autoConfirmed, true))
++    .orderBy(desc(sales.createdAt))
++    .limit(limit);
++  return rows.map((row) => ({
++    ...withFinancials(row.sale),
++    stockItemName: row.stockItemName,
++    stockItemInternalCode: row.stockItemInternalCode,
++  }));
++}
++
++/**
++ * Preenche quem despachou de verdade uma venda que entrou sozinha (ver
++ * autoConfirmed/dispatchedByConfirmed em schema.ts) — até isso ser chamado,
++ * dispatchedBy tem um valor provisório que já vale pro rateio operacional de
++ * 5%, então essa correção é o que garante que o Juan/Djow certo recebe.
++ */
++export async function setDispatchedByForAutoConfirmedSale(saleId: string, dispatchedBy: Dispatcher) {
++  await db
++    .update(sales)
++    .set({ dispatchedBy, dispatchedByConfirmed: true, updatedAt: new Date() })
++    .where(eq(sales.id, saleId));
++  revalidatePath("/pendentes");
++  revalidatePath("/vendas");
++  revalidatePath("/");
++}
++
++// ---- Gerenciar vínculos "anúncio → produto" memorizados ----
++
++export interface AdTitleMappingRow {
++  id: string;
++  adTitle: string;
++  stockItemId: string;
++  stockItemName: string;
++  stockItemInternalCode: number;
++  updatedAt: Date;
++}
++
++/** Todos os vínculos memorizados, mais recentemente atualizados primeiro — pra revisar/corrigir em /pendentes. */
++export async function listAdTitleMappings(): Promise<AdTitleMappingRow[]> {
++  return db
++    .select({
++      id: adTitleMappings.id,
++      adTitle: adTitleMappings.adTitle,
++      stockItemId: adTitleMappings.stockItemId,
++      stockItemName: stockItems.name,
++      stockItemInternalCode: stockItems.internalCode,
++      updatedAt: adTitleMappings.updatedAt,
++    })
++    .from(adTitleMappings)
++    .innerJoin(stockItems, eq(adTitleMappings.stockItemId, stockItems.id))
++    .orderBy(desc(adTitleMappings.updatedAt));
++}
++
++/** Corrige manualmente pra qual produto um anúncio aponta — não mexe em vendas já confirmadas com o vínculo antigo, só nas próximas. */
++export async function updateAdTitleMapping(id: string, stockItemId: string) {
++  await db.update(adTitleMappings).set({ stockItemId, updatedAt: new Date() }).where(eq(adTitleMappings.id, id));
++  revalidatePath("/pendentes");
++}
++
++/** Remove o vínculo — a próxima venda desse anúncio volta a cair em Pendentes pra escolha manual. */
++export async function deleteAdTitleMapping(id: string) {
++  await db.delete(adTitleMappings).where(eq(adTitleMappings.id, id));
++  revalidatePath("/pendentes");
++}
+diff --git a/src/app/pendentes/page.tsx b/src/app/pendentes/page.tsx
+index a735c48..817cb3d 100644
+--- a/src/app/pendentes/page.tsx
++++ b/src/app/pendentes/page.tsx
+@@ -2,12 +2,20 @@ import Link from "next/link";
+ import { AlertTriangle, CheckCircle2, Inbox, Plug, Plus, Unplug } from "lucide-react";
+ import { Card } from "@/components/ui/Card";
+ import { LinkButton } from "@/components/ui/Button";
+-import { listConnections, listPendingSales } from "@/actions/mercadolivre";
++import {
++  listAdTitleMappings,
++  listAutoConfirmedSales,
++  listConnections,
++  listPendingSales,
++} from "@/actions/mercadolivre";
+ import { listStockItemsWithStock } from "@/actions/stock";
+ import { PendingSaleCard } from "@/components/pendentes/PendingSaleCard";
+ import { SyncRecentOrdersButton } from "@/components/pendentes/SyncRecentOrdersButton";
+ import { RemoveMlAccountButton } from "@/components/pendentes/RemoveMlAccountButton";
++import { AutoConfirmedSalesList } from "@/components/pendentes/AutoConfirmedSalesList";
++import { AdTitleMappingsPanel } from "@/components/pendentes/AdTitleMappingsPanel";
+ import { AccountFilterBar } from "@/components/shared/AccountFilterBar";
++import { accountLabel } from "@/lib/accounts";
+ import { formatDate } from "@/lib/format";
+ 
+ export const dynamic = "force-dynamic";
+@@ -23,12 +31,16 @@ export default async function PendentesPage(props: PageProps<"/pendentes">) {
+   const erro = typeof searchParams.ml_erro === "string" ? searchParams.ml_erro : undefined;
+   const mlSellerId = typeof searchParams.conta === "string" && searchParams.conta ? searchParams.conta : undefined;
+ 
+-  const [connections, pendingSales, stockItems] = await Promise.all([
++  const [connections, pendingSales, stockItems, autoConfirmedSales, adTitleMappings] = await Promise.all([
+     listConnections(),
+     listPendingSales(mlSellerId),
+     listStockItemsWithStock({ onlyActive: true }),
++    listAutoConfirmedSales(),
++    listAdTitleMappings(),
+   ]);
+ 
++  const accountLabelByMlUserId = new Map(connections.map((c) => [c.mlUserId, accountLabel(c)]));
++
+   return (
+     <div className="p-4 md:p-8 max-w-3xl mx-auto animate-in">
+       <div className="mb-6">
+@@ -112,6 +124,10 @@ export default async function PendentesPage(props: PageProps<"/pendentes">) {
+ 
+       <AccountFilterBar connections={connections} current={mlSellerId} action="/pendentes" />
+ 
++      <AutoConfirmedSalesList sales={autoConfirmedSales} accountLabelByMlUserId={accountLabelByMlUserId} />
++
++      <AdTitleMappingsPanel mappings={adTitleMappings} stockItems={stockItems} />
++
+       {stockItems.length === 0 && pendingSales.length > 0 && (
+         <div className="mb-6 flex items-center gap-2 rounded-xl bg-warning-soft px-4 py-3 text-sm text-warning">
+           <AlertTriangle size={16} />
+diff --git a/src/components/pendentes/AdTitleMappingsPanel.tsx b/src/components/pendentes/AdTitleMappingsPanel.tsx
+new file mode 100644
+index 0000000..0a286eb
+--- /dev/null
++++ b/src/components/pendentes/AdTitleMappingsPanel.tsx
+@@ -0,0 +1,146 @@
++"use client";
++
++import { useState, useTransition } from "react";
++import { Check, ChevronDown, ChevronRight, Link2, Loader2, Pencil, Trash2, X } from "lucide-react";
++import { Card } from "@/components/ui/Card";
++import { Select } from "@/components/ui/Field";
++import { deleteAdTitleMapping, updateAdTitleMapping, type AdTitleMappingRow } from "@/actions/mercadolivre";
++import type { StockItemRow } from "@/actions/stock";
++import { formatDate } from "@/lib/format";
++
++/**
++ * Lista os vínculos "anúncio → produto" memorizados a partir de
++ * confirmações manuais em Pendentes — é isso que faz a próxima venda do
++ * MESMO anúncio entrar sozinha no dashboard (ver AutoConfirmedSalesList).
++ * Dá pra corrigir um vínculo errado (troca o produto, sem mexer em vendas
++ * já lançadas com o vínculo antigo) ou remover, fazendo esse anúncio voltar
++ * a pedir confirmação manual da próxima vez.
++ */
++export function AdTitleMappingsPanel({
++  mappings,
++  stockItems,
++}: {
++  mappings: AdTitleMappingRow[];
++  stockItems: StockItemRow[];
++}) {
++  const [expanded, setExpanded] = useState(false);
++
++  if (mappings.length === 0) return null;
++
++  return (
++    <Card className="mb-6">
++      <button
++        type="button"
++        onClick={() => setExpanded((v) => !v)}
++        className="flex w-full items-center justify-between gap-2 text-left"
++      >
++        <div className="flex items-center gap-3">
++          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface-muted text-muted">
++            <Link2 size={16} />
++          </span>
++          <div>
++            <p className="text-sm font-semibold">Vínculos automáticos (anúncio → produto)</p>
++            <p className="text-xs text-muted">
++              {mappings.length} anúncio{mappings.length === 1 ? "" : "s"} memorizado{mappings.length === 1 ? "" : "s"} — a
++              próxima venda de cada um entra sozinha.
++            </p>
++          </div>
++        </div>
++        {expanded ? <ChevronDown size={16} className="text-muted" /> : <ChevronRight size={16} className="text-muted" />}
++      </button>
++      {expanded && (
++        <div className="mt-3 divide-y divide-border border-t border-border">
++          {mappings.map((mapping) => (
++            <MappingRow key={mapping.id} mapping={mapping} stockItems={stockItems} />
++          ))}
++        </div>
++      )}
++    </Card>
++  );
++}
++
++function MappingRow({ mapping, stockItems }: { mapping: AdTitleMappingRow; stockItems: StockItemRow[] }) {
++  const [editing, setEditing] = useState(false);
++  const [stockItemId, setStockItemId] = useState(mapping.stockItemId);
++  const [isSaving, startSaveTransition] = useTransition();
++  const [isDeleting, startDeleteTransition] = useTransition();
++
++  return (
++    <div className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
++      <div className="min-w-0">
++        <p className="text-sm font-medium truncate">{mapping.adTitle}</p>
++        <p className="text-xs text-muted mt-0.5">
++          → <span className="font-medium text-foreground">#{mapping.stockItemInternalCode} {mapping.stockItemName}</span>
++          {" · atualizado "}
++          {formatDate(mapping.updatedAt)}
++        </p>
++      </div>
++      {editing ? (
++        <div className="flex items-center gap-2 shrink-0">
++          <div className="w-56">
++            <Select value={stockItemId} onChange={(e) => setStockItemId(e.target.value)}>
++              {stockItems.map((item) => (
++                <option key={item.id} value={item.id}>
++                  #{item.internalCode} {item.name}
++                </option>
++              ))}
++            </Select>
++          </div>
++          <button
++            type="button"
++            title="Salvar"
++            disabled={isSaving}
++            onClick={() =>
++              startSaveTransition(async () => {
++                await updateAdTitleMapping(mapping.id, stockItemId);
++                setEditing(false);
++              })
++            }
++            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-surface-muted transition-colors disabled:opacity-50"
++          >
++            {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
++          </button>
++          <button
++            type="button"
++            title="Cancelar"
++            onClick={() => {
++              setStockItemId(mapping.stockItemId);
++              setEditing(false);
++            }}
++            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-surface-muted transition-colors"
++          >
++            <X size={14} />
++          </button>
++        </div>
++      ) : (
++        <div className="flex items-center gap-1 shrink-0">
++          <button
++            type="button"
++            title="Trocar o produto vinculado"
++            onClick={() => setEditing(true)}
++            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-surface-muted transition-colors"
++          >
++            <Pencil size={14} />
++          </button>
++          <button
++            type="button"
++            title="Remover vínculo"
++            disabled={isDeleting}
++            onClick={() => {
++              if (
++                window.confirm(
++                  `Remover o vínculo de "${mapping.adTitle}"? A próxima venda desse anúncio volta a pedir confirmação manual em Pendentes.`
++                )
++              ) {
++                startDeleteTransition(() => deleteAdTitleMapping(mapping.id));
++              }
++            }}
++            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-danger-soft hover:text-danger transition-colors disabled:opacity-50"
++          >
++            {isDeleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
++          </button>
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/src/components/pendentes/AutoConfirmedSalesList.tsx b/src/components/pendentes/AutoConfirmedSalesList.tsx
+new file mode 100644
+index 0000000..a4be32f
+--- /dev/null
++++ b/src/components/pendentes/AutoConfirmedSalesList.tsx
+@@ -0,0 +1,112 @@
++"use client";
++
++import { useTransition } from "react";
++import { Loader2, Sparkles } from "lucide-react";
++import { Card } from "@/components/ui/Card";
++import { setDispatchedByForAutoConfirmedSale, type AutoConfirmedSaleRow } from "@/actions/mercadolivre";
++import { DISPATCHER_LABELS, DISPATCHERS, type Dispatcher } from "@/db/schema";
++import { formatCurrency, formatDate } from "@/lib/format";
++
++/**
++ * Lista as últimas vendas que o sistema confirmou sozinho (anúncio já
++ * mapeado a um produto — ver AdTitleMappingsPanel) pra conferência: qual
++ * produto foi usado, custo aplicado e — quando ainda não escolhido de
++ * verdade — quem despacha, já que isso não dá pra saber sozinho.
++ */
++export function AutoConfirmedSalesList({
++  sales,
++  accountLabelByMlUserId,
++}: {
++  sales: AutoConfirmedSaleRow[];
++  accountLabelByMlUserId: Map<string, string>;
++}) {
++  if (sales.length === 0) return null;
++
++  return (
++    <Card className="mb-6">
++      <div className="mb-3 flex items-center gap-2">
++        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent-soft text-accent">
++          <Sparkles size={16} />
++        </span>
++        <div>
++          <p className="text-sm font-semibold">Confirmadas automaticamente</p>
++          <p className="text-xs text-muted">
++            Entraram sozinhas no dashboard porque o anúncio já tinha um produto vinculado. Confira e, se faltar, diga
++            quem despachou.
++          </p>
++        </div>
++      </div>
++      <div className="divide-y divide-border">
++        {sales.map((sale) => (
++          <AutoConfirmedSaleRowItem
++            key={sale.id}
++            sale={sale}
++            accountLabel={sale.mlSellerId ? accountLabelByMlUserId.get(sale.mlSellerId) ?? null : null}
++          />
++        ))}
++      </div>
++    </Card>
++  );
++}
++
++function AutoConfirmedSaleRowItem({
++  sale,
++  accountLabel,
++}: {
++  sale: AutoConfirmedSaleRow;
++  accountLabel: string | null;
++}) {
++  const [isPending, startTransition] = useTransition();
++
++  return (
++    <div className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
++      <div className="min-w-0">
++        <p className="text-sm font-medium truncate">{sale.productNameSnapshot}</p>
++        <p className="text-xs text-muted mt-0.5">
++          {sale.stockItemName ? (
++            <>
++              produto: <span className="font-medium text-foreground">#{sale.stockItemInternalCode} {sale.stockItemName}</span>
++              {" · "}
++            </>
++          ) : null}
++          {formatDate(sale.saleDate)}
++          {accountLabel ? ` · ${accountLabel}` : ""}
++        </p>
++      </div>
++      <div className="flex items-center gap-3 shrink-0">
++        <div className="text-right">
++          <p className="text-sm font-semibold">{formatCurrency(sale.revenue)}</p>
++          <p className={`text-xs ${sale.profit >= 0 ? "text-success" : "text-danger"}`}>lucro {formatCurrency(sale.profit)}</p>
++        </div>
++        {sale.dispatchedByConfirmed ? (
++          <span className="rounded-full bg-surface-muted px-2.5 py-1 text-xs font-medium text-muted whitespace-nowrap">
++            {DISPATCHER_LABELS[sale.dispatchedBy]}
++          </span>
++        ) : (
++          <div className="relative inline-flex items-center">
++            <select
++              defaultValue=""
++              disabled={isPending}
++              onChange={(e) => {
++                const value = e.target.value as Dispatcher;
++                if (!value) return;
++                startTransition(() => setDispatchedByForAutoConfirmedSale(sale.id, value));
++              }}
++              className="h-8 rounded-full border-0 bg-warning-soft pl-3 pr-7 text-xs font-semibold text-warning focus:outline-none focus:ring-2 focus:ring-accent/30"
++            >
++              <option value="" disabled>
++                Quem despachou?
++              </option>
++              {DISPATCHERS.map((dispatcher) => (
++                <option key={dispatcher} value={dispatcher}>
++                  {DISPATCHER_LABELS[dispatcher]}
++                </option>
++              ))}
++            </select>
++            {isPending && <Loader2 size={12} className="animate-spin absolute right-2" />}
++          </div>
++        )}
++      </div>
++    </div>
++  );
++}
+diff --git a/src/components/pendentes/PendingSaleCard.tsx b/src/components/pendentes/PendingSaleCard.tsx
+index 2de8d5e..84c8f0e 100644
+--- a/src/components/pendentes/PendingSaleCard.tsx
++++ b/src/components/pendentes/PendingSaleCard.tsx
+@@ -10,13 +10,10 @@ import { confirmPendingSale, ignorePendingSale } from "@/actions/mercadolivre";
+ import { NOVO_PRODUTO_SENTINEL } from "@/lib/stock-matching";
+ import type { StockItemRow } from "@/actions/stock";
+ import { formatCurrency, formatDate, formatPercent, formatTime } from "@/lib/format";
++import { toSaoPauloDateISO } from "@/lib/dates";
+ import { DISPATCHER_LABELS, DISPATCHERS, type PendingSale } from "@/db/schema";
+ import type { ActionResult } from "@/actions/products";
+ 
+-function toDateInputValue(date: Date): string {
+-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(date);
+-}
+-
+ export function PendingSaleCard({
+   pending,
+   stockItems,
+@@ -167,7 +164,7 @@ export function PendingSaleCard({
+           />
+         </div>
+ 
+-        <input type="hidden" name="saleDate" value={toDateInputValue(orderDateObj)} />
++        <input type="hidden" name="saleDate" value={toSaoPauloDateISO(orderDateObj)} />
+ 
+         {errors.form && <p className="text-sm text-danger">{errors.form}</p>}
+ 
+diff --git a/src/db/schema.ts b/src/db/schema.ts
+index 0b7667f..46145c1 100755
+--- a/src/db/schema.ts
++++ b/src/db/schema.ts
+@@ -299,6 +299,19 @@ export const sales = pgTable(
+     dispatchedBy: text("dispatched_by", { enum: DISPATCHERS })
+       .notNull()
+       .default("juan"),
++    // true quando essa venda foi confirmada sozinha pelo sistema (a partir de
++    // um vínculo anúncio→produto já memorizado em ad_title_mappings), sem
++    // ninguém olhar em Pendentes — usado pra listar "confirmadas
++    // automaticamente" em /pendentes pra conferência. false = confirmada
++    // manualmente (fluxo de sempre).
++    autoConfirmed: boolean("auto_confirmed").notNull().default(false),
++    // Numa confirmação automática não tem como saber quem realmente vai
++    // despachar o pacote — dispatchedBy acima entra com um valor provisório
++    // (ATENÇÃO: entra valendo pro rateio operacional de 5% até ser corrigido)
++    // e essa coluna fica false até alguém escolher de verdade na lista de
++    // "confirmadas automaticamente" em /pendentes. Confirmação manual sempre
++    // grava true, porque a pessoa já escolhe quem despachou na hora.
++    dispatchedByConfirmed: boolean("dispatched_by_confirmed").notNull().default(true),
+ 
+     // --- Snapshot da divisão de lucro vigente no momento da venda ---
+     // Guardamos os percentuais usados (e não só o valor calculado) para que
+@@ -585,6 +598,34 @@ export const pendingSales = pgTable(
+   ]
+ );
+ 
++// Vínculo memorizado "título do anúncio → produto de estoque", usado pra
++// confirmar sozinha (sem passar por revisão manual em Pendentes) uma venda
++// nova cujo anúncio já apareceu antes. Só é criado/atualizado quando uma
++// PESSOA confirma manualmente uma venda pendente daquele título — nunca por
++// adivinhação de texto (ver comentário em tryAutoConfirmPendingSale, em
++// lib/mercadolivre.ts) — então o pior caso é repetir uma escolha que o Juan
++// ou o Djow já fizeram antes, nunca inventar uma nova. Confirmar de novo,
++// manualmente, uma venda do mesmo título com um produto diferente substitui
++// o vínculo (corrige um mapeamento errado pra frente, sem mexer em vendas
++// já lançadas).
++export const adTitleMappings = pgTable(
++  "ad_title_mappings",
++  {
++    id: uuid("id").primaryKey().defaultRandom(),
++    adTitle: text("ad_title").notNull(),
++    stockItemId: uuid("stock_item_id")
++      .notNull()
++      .references(() => stockItems.id, { onDelete: "cascade" }),
++    createdAt: timestamp("created_at", { withTimezone: true })
++      .notNull()
++      .defaultNow(),
++    updatedAt: timestamp("updated_at", { withTimezone: true })
++      .notNull()
++      .defaultNow(),
++  },
++  (table) => [unique("ad_title_mappings_ad_title_unique").on(table.adTitle)]
++);
++
+ // Conta de e-mail (Gmail) conectada para varredura automática de NF-e de
+ // fornecedores. Cada conta guarda seu próprio par de tokens OAuth — permite
+ // conectar as contas do Juan, do Djow e de mais e-mails no futuro, cada uma
+@@ -684,3 +725,4 @@ export type NfeEmailAccount = typeof nfeEmailAccounts.$inferSelect;
+ export type NfePendente = typeof nfePendentes.$inferSelect;
+ export type StockItem = typeof stockItems.$inferSelect;
+ export type StockPurchase = typeof stockPurchases.$inferSelect;
++export type AdTitleMapping = typeof adTitleMappings.$inferSelect;
+diff --git a/src/lib/dates.ts b/src/lib/dates.ts
+index 5ab9801..76ee71e 100755
+--- a/src/lib/dates.ts
++++ b/src/lib/dates.ts
+@@ -33,6 +33,17 @@ export function addDays(dateISO: string, days: number): string {
+   return date.toISOString().slice(0, 10);
+ }
+ 
++/**
++ * Converte um instante (Date) pra data ISO (AAAA-MM-DD) no fuso de
++ * São Paulo — usado pra transformar `orderDate`/`pending.orderDate` (um
++ * timestamp) na data "do dia" que preenche `sales.saleDate`, tanto na
++ * confirmação manual (PendingSaleCard) quanto na automática
++ * (tryAutoConfirmPendingSale) — as duas precisam bater exatamente.
++ */
++export function toSaoPauloDateISO(date: Date): string {
++  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(date);
++}
++
+ /** Quantidade de dias entre duas datas ISO, incluindo os dois extremos. */
+ export function daysBetweenInclusive(from: string, to: string): number {
+   const [y1, m1, d1] = from.split("-").map(Number);
+diff --git a/src/lib/mercadolivre.ts b/src/lib/mercadolivre.ts
+index adfe598..862e768 100644
+--- a/src/lib/mercadolivre.ts
++++ b/src/lib/mercadolivre.ts
+@@ -1,6 +1,11 @@
+-import { eq } from "drizzle-orm";
++import { and, eq } from "drizzle-orm";
++import { revalidatePath } from "next/cache";
+ import { db } from "@/db";
+-import { mercadolivreCredentials, pendingSales } from "@/db/schema";
++import { adTitleMappings, mercadolivreCredentials, pendingSales, stockItems } from "@/db/schema";
++import { createSaleFromPendingSale } from "@/lib/pending-sale-confirmation";
++import { fromReferenceCostPrice } from "@/lib/product-pricing";
++import { toNumber } from "@/lib/calculations";
++import { toSaoPauloDateISO } from "@/lib/dates";
+ 
+ const ML_API_BASE = "https://api.mercadolibre.com";
+ const ML_AUTH_BASE = "https://auth.mercadolivre.com.br";
+@@ -428,6 +433,68 @@ export async function searchRecentOrders(
+  * conta esse pedido pertence e passar o access_token e o ID do vendedor
+  * dessa conta especificamente.
+  */
++/**
++ * Confirma sozinha uma venda pendente recém chegada (webhook ou
++ * sincronização manual) QUANDO — e só quando — o título do anúncio já tem
++ * um vínculo memorizado em ad_title_mappings, criado antes por uma pessoa
++ * confirmando manualmente uma venda daquele mesmo anúncio em /pendentes.
++ * Nunca tenta adivinhar por semelhança de texto: sem vínculo exato, a venda
++ * simplesmente fica pendente pra revisão manual, como sempre foi — essa é a
++ * escolha deliberada (ver AdTitleMappingsPanel) pra nunca aplicar custo nem
++ * dar baixa de estoque no produto errado sozinha.
++ *
++ * `dispatchedBy` entra com um valor provisório (ver
++ * sales.dispatchedByConfirmed em schema.ts) porque não tem como saber quem
++ * vai despachar o pacote sem alguém decidir — fica sinalizado como
++ * pendente de revisão na lista de "confirmadas automaticamente" em
++ * /pendentes (ver listAutoConfirmedSales/setDispatchedByForAutoConfirmedSale
++ * em actions/mercadolivre.ts).
++ */
++async function tryAutoConfirmPendingSale(mlOrderId: string, mlOrderItemId: string): Promise<void> {
++  const [pending] = await db
++    .select()
++    .from(pendingSales)
++    .where(and(eq(pendingSales.mlOrderId, mlOrderId), eq(pendingSales.mlOrderItemId, mlOrderItemId)))
++    .limit(1);
++  if (!pending || pending.status !== "pendente") return;
++
++  const [mapping] = await db
++    .select({ stockItemId: adTitleMappings.stockItemId })
++    .from(adTitleMappings)
++    .where(eq(adTitleMappings.adTitle, pending.titleSnapshot))
++    .limit(1);
++  if (!mapping) return;
++
++  const [item] = await db.select().from(stockItems).where(eq(stockItems.id, mapping.stockItemId)).limit(1);
++  // Sem item (não deveria acontecer — a FK do vínculo é onDelete: "cascade")
++  // ou sem custo de referência cadastrado ainda: não arrisca lançar com um
++  // custo inventado (ex: 0, inflando o lucro), deixa pendente pra alguém
++  // revisar e preencher o custo uma vez — depois disso, as próximas do
++  // mesmo anúncio voltam a confirmar sozinhas.
++  if (!item || item.referenceCostPrice === null) return;
++
++  const unitCost = fromReferenceCostPrice(item.saleUnitType, item.unitsPerPackage, toNumber(item.referenceCostPrice));
++
++  await createSaleFromPendingSale({
++    pending,
++    stockItemId: item.id,
++    quantity: pending.quantity,
++    saleDate: toSaoPauloDateISO(pending.orderDate),
++    dispatchedBy: "juan",
++    productCostManual: unitCost * pending.quantity,
++    autoConfirmed: true,
++    dispatchedByConfirmed: false,
++  });
++
++  revalidatePath("/pendentes");
++  revalidatePath("/vendas");
++  revalidatePath("/");
++  revalidatePath("/produtos");
++  revalidatePath("/custo-fornecimento");
++  revalidatePath("/compras");
++  revalidatePath("/cadastro-produtos");
++}
++
+ export async function upsertPendingSalesFromOrder(
+   order: MlOrder,
+   ctx: { accessToken: string; sellerId: string }
+@@ -501,6 +568,19 @@ export async function upsertPendingSalesFromOrder(
+           updatedAt: new Date(),
+         },
+       });
++
++    // Tenta confirmar sozinha, se esse título de anúncio já tiver vínculo
++    // memorizado — ver comentário completo em tryAutoConfirmPendingSale.
++    // Roda sempre (webhook e sincronização manual), pra pegar tanto vendas
++    // que acabaram de chegar quanto uma pendente antiga cujo anúncio só
++    // ganhou vínculo depois (ex: confirmando manualmente uma outra venda do
++    // mesmo anúncio). Uma falha aqui não deve derrubar o recebimento da
++    // venda em si — ela só continua pendente pra revisão manual.
++    try {
++      await tryAutoConfirmPendingSale(String(order.id), orderItem.item.id);
++    } catch (err) {
++      console.error("Falha ao tentar confirmar automaticamente venda pendente:", err);
++    }
+   }
+ }
+ 
+diff --git a/src/lib/pending-sale-confirmation.ts b/src/lib/pending-sale-confirmation.ts
+new file mode 100644
+index 0000000..9f6b9ce
+--- /dev/null
++++ b/src/lib/pending-sale-confirmation.ts
+@@ -0,0 +1,121 @@
++import { eq } from "drizzle-orm";
++import { db } from "@/db";
++import { pendingSales, sales, type Dispatcher, type PendingSale } from "@/db/schema";
++import { getSettings } from "@/actions/settings";
++
++/**
++ * Extrai o ID do primeiro pagamento do payload bruto do pedido (salvo em
++ * pending_sales.raw_order_payload), pra guardar em sales.mlPaymentId — é por
++ * esse ID, não pelo order_id, que dá pra consultar a liberação do dinheiro
++ * em GET /v1/payments/$id (ver actions/liberacoes.ts). Não faz uma chamada
++ * nova à API: o payload do pedido já tem esse dado desde que foi
++ * sincronizado/recebido pelo webhook.
++ */
++function extractFirstPaymentId(rawOrderPayload: unknown): string | null {
++  if (!rawOrderPayload || typeof rawOrderPayload !== "object") return null;
++  const payments = (rawOrderPayload as { payments?: unknown }).payments;
++  if (!Array.isArray(payments) || payments.length === 0) return null;
++  const first = payments[0];
++  if (!first || typeof first !== "object") return null;
++  const id = (first as { id?: unknown }).id;
++  return id !== undefined && id !== null ? String(id) : null;
++}
++
++export interface CreateSaleFromPendingInput {
++  pending: PendingSale;
++  stockItemId: string;
++  quantity: number;
++  saleDate: string;
++  dispatchedBy: Dispatcher;
++  /** Custo TOTAL (não por unidade) da mercadoria dessa venda. */
++  productCostManual: number;
++  /**
++   * true = confirmada sozinha pelo sistema via ad_title_mappings, sem
++   * ninguém revisar em Pendentes. false = confirmação manual (fluxo normal).
++   */
++  autoConfirmed: boolean;
++  /**
++   * false só faz sentido junto com autoConfirmed: true — sinaliza que
++   * `dispatchedBy` acima é um valor provisório e ainda precisa ser escolhido
++   * de verdade na lista de "confirmadas automaticamente" (ver
++   * actions/mercadolivre.ts: setDispatchedByForAutoConfirmedSale).
++   */
++  dispatchedByConfirmed: boolean;
++}
++
++/**
++ * Cria a venda de verdade (tabela `sales`) a partir de uma venda pendente já
++ * resolvida (produto de estoque, quantidade, custo e quem despacha já
++ * decididos) e marca a pendência como confirmada — núcleo compartilhado
++ * entre a confirmação manual (confirmPendingSale, em actions/mercadolivre.ts)
++ * e a confirmação automática por vínculo memorizado
++ * (tryAutoConfirmPendingSale, em lib/mercadolivre.ts), pra nunca divergir a
++ * lógica de como uma venda do Mercado Livre vira uma venda "de verdade".
++ */
++export async function createSaleFromPendingSale(
++  input: CreateSaleFromPendingInput
++): Promise<{ saleId: string }> {
++  const partnerSettings = await getSettings();
++  const productCostManual = input.productCostManual.toFixed(2);
++
++  const [createdSale] = await db
++    .insert(sales)
++    .values({
++      productId: null,
++      source: "mercadolivre",
++      productNameSnapshot: input.pending.titleSnapshot,
++      mlOrderId: input.pending.mlOrderId,
++      mlSellerId: input.pending.mlSellerId,
++      mlPaymentId: extractFirstPaymentId(input.pending.rawOrderPayload),
++      mlPackId: input.pending.mlPackId,
++      stockItemId: input.stockItemId,
++      buyerNickname: input.pending.buyerNickname,
++      buyerFullName: input.pending.buyerFullName,
++      quantity: input.quantity,
++      saleDate: input.saleDate,
++      // Entra sempre como "pendente" — quem confirma a entrada não é
++      // necessariamente quem despacha o pacote, então o Juan ou o Djow
++      // marcam "despachado" manualmente em /vendas quando isso realmente
++      // acontecer (ver updateSaleStatus em actions/sales.ts).
++      orderStatus: "pendente",
++      dispatchedBy: input.dispatchedBy,
++      autoConfirmed: input.autoConfirmed,
++      dispatchedByConfirmed: input.dispatchedByConfirmed,
++      operationalFeePercentSnapshot: partnerSettings.operationalFeePercent.toString(),
++      reservePercentSnapshot: partnerSettings.reservePercent.toString(),
++      donationPercentSnapshot: partnerSettings.donationPercent.toString(),
++      notes: input.autoConfirmed
++        ? `Confirmado automaticamente (anúncio já mapeado) — pedido ${input.pending.mlOrderId}.`
++        : `Importado do Mercado Livre — pedido ${input.pending.mlOrderId}.`,
++      // Colunas do "modelo de receita" antigo (produto cadastrado) não se
++      // aplicam a uma venda do Mercado Livre — preenchidas com valores
++      // neutros só para satisfazer as colunas NOT NULL; withFinancials()
++      // ignora todas elas quando source = "mercadolivre" e usa os valores
++      // reais abaixo em vez disso.
++      unitPriceSnapshot: input.pending.unitPriceSnapshot,
++      kitQuantitySnapshot: 1,
++      saleFeeTypeSnapshot: "fixo",
++      saleFeeValueSnapshot: "0",
++      freeShippingSnapshot: false,
++      shippingCostSnapshot: "0",
++      packagingCostSnapshot: "0",
++      productCostSnapshot: "0",
++      mlSaleFeeTotalSnapshot: input.pending.mlSaleFeeSnapshot,
++      mlShippingTotalSnapshot: input.pending.mlShippingCostSnapshot,
++      productCostManualSnapshot: productCostManual,
++    })
++    .returning({ id: sales.id });
++
++  await db
++    .update(pendingSales)
++    .set({
++      status: "confirmada",
++      dispatchedBy: input.dispatchedBy,
++      productCostManual,
++      resultingSaleId: createdSale.id,
++      updatedAt: new Date(),
++    })
++    .where(eq(pendingSales.id, input.pending.id));
++
++  return { saleId: createdSale.id };
++}
+-- 
+2.43.0
+

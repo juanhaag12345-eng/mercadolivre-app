@@ -141,6 +141,13 @@
       "when": 1789829084075,
       "tag": "0019_stock_items_internal_code_app_managed",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1789831061095,
+      "tag": "0020_ad_title_mappings_and_auto_confirm",
+      "breakpoints": true
     }
   ]
 }

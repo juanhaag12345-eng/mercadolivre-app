@@ -1,6 +1,11 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
 import { db } from "@/db";
-import { mercadolivreCredentials, pendingSales } from "@/db/schema";
+import { adTitleMappings, mercadolivreCredentials, pendingSales, stockItems } from "@/db/schema";
+import { createSaleFromPendingSale } from "@/lib/pending-sale-confirmation";
+import { fromReferenceCostPrice } from "@/lib/product-pricing";
+import { toNumber } from "@/lib/calculations";
+import { toSaoPauloDateISO } from "@/lib/dates";
 
 const ML_API_BASE = "https://api.mercadolibre.com";
 const ML_AUTH_BASE = "https://auth.mercadolivre.com.br";
@@ -428,6 +433,68 @@ export async function searchRecentOrders(
  * conta esse pedido pertence e passar o access_token e o ID do vendedor
  * dessa conta especificamente.
  */
+/**
+ * Confirma sozinha uma venda pendente recém chegada (webhook ou
+ * sincronização manual) QUANDO — e só quando — o título do anúncio já tem
+ * um vínculo memorizado em ad_title_mappings, criado antes por uma pessoa
+ * confirmando manualmente uma venda daquele mesmo anúncio em /pendentes.
+ * Nunca tenta adivinhar por semelhança de texto: sem vínculo exato, a venda
+ * simplesmente fica pendente pra revisão manual, como sempre foi — essa é a
+ * escolha deliberada (ver AdTitleMappingsPanel) pra nunca aplicar custo nem
+ * dar baixa de estoque no produto errado sozinha.
+ *
+ * `dispatchedBy` entra com um valor provisório (ver
+ * sales.dispatchedByConfirmed em schema.ts) porque não tem como saber quem
+ * vai despachar o pacote sem alguém decidir — fica sinalizado como
+ * pendente de revisão na lista de "confirmadas automaticamente" em
+ * /pendentes (ver listAutoConfirmedSales/setDispatchedByForAutoConfirmedSale
+ * em actions/mercadolivre.ts).
+ */
+async function tryAutoConfirmPendingSale(mlOrderId: string, mlOrderItemId: string): Promise<void> {
+  const [pending] = await db
+    .select()
+    .from(pendingSales)
+    .where(and(eq(pendingSales.mlOrderId, mlOrderId), eq(pendingSales.mlOrderItemId, mlOrderItemId)))
+    .limit(1);
+  if (!pending || pending.status !== "pendente") return;
+
+  const [mapping] = await db
+    .select({ stockItemId: adTitleMappings.stockItemId })
+    .from(adTitleMappings)
+    .where(eq(adTitleMappings.adTitle, pending.titleSnapshot))
+    .limit(1);
+  if (!mapping) return;
+
+  const [item] = await db.select().from(stockItems).where(eq(stockItems.id, mapping.stockItemId)).limit(1);
+  // Sem item (não deveria acontecer — a FK do vínculo é onDelete: "cascade")
+  // ou sem custo de referência cadastrado ainda: não arrisca lançar com um
+  // custo inventado (ex: 0, inflando o lucro), deixa pendente pra alguém
+  // revisar e preencher o custo uma vez — depois disso, as próximas do
+  // mesmo anúncio voltam a confirmar sozinhas.
+  if (!item || item.referenceCostPrice === null) return;
+
+  const unitCost = fromReferenceCostPrice(item.saleUnitType, item.unitsPerPackage, toNumber(item.referenceCostPrice));
+
+  await createSaleFromPendingSale({
+    pending,
+    stockItemId: item.id,
+    quantity: pending.quantity,
+    saleDate: toSaoPauloDateISO(pending.orderDate),
+    dispatchedBy: "juan",
+    productCostManual: unitCost * pending.quantity,
+    autoConfirmed: true,
+    dispatchedByConfirmed: false,
+  });
+
+  revalidatePath("/pendentes");
+  revalidatePath("/vendas");
+  revalidatePath("/");
+  revalidatePath("/produtos");
+  revalidatePath("/custo-fornecimento");
+  revalidatePath("/compras");
+  revalidatePath("/cadastro-produtos");
+}
+
 export async function upsertPendingSalesFromOrder(
   order: MlOrder,
   ctx: { accessToken: string; sellerId: string }
@@ -501,6 +568,19 @@ export async function upsertPendingSalesFromOrder(
           updatedAt: new Date(),
         },
       });
+
+    // Tenta confirmar sozinha, se esse título de anúncio já tiver vínculo
+    // memorizado — ver comentário completo em tryAutoConfirmPendingSale.
+    // Roda sempre (webhook e sincronização manual), pra pegar tanto vendas
+    // que acabaram de chegar quanto uma pendente antiga cujo anúncio só
+    // ganhou vínculo depois (ex: confirmando manualmente uma outra venda do
+    // mesmo anúncio). Uma falha aqui não deve derrubar o recebimento da
+    // venda em si — ela só continua pendente pra revisão manual.
+    try {
+      await tryAutoConfirmPendingSale(String(order.id), orderItem.item.id);
+    } catch (err) {
+      console.error("Falha ao tentar confirmar automaticamente venda pendente:", err);
+    }
   }
 }
 

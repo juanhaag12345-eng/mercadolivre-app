@@ -2,12 +2,20 @@ import Link from "next/link";
 import { AlertTriangle, CheckCircle2, Inbox, Plug, Plus, Unplug } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { LinkButton } from "@/components/ui/Button";
-import { listConnections, listPendingSales } from "@/actions/mercadolivre";
+import {
+  listAdTitleMappings,
+  listAutoConfirmedSales,
+  listConnections,
+  listPendingSales,
+} from "@/actions/mercadolivre";
 import { listStockItemsWithStock } from "@/actions/stock";
 import { PendingSaleCard } from "@/components/pendentes/PendingSaleCard";
 import { SyncRecentOrdersButton } from "@/components/pendentes/SyncRecentOrdersButton";
 import { RemoveMlAccountButton } from "@/components/pendentes/RemoveMlAccountButton";
+import { AutoConfirmedSalesList } from "@/components/pendentes/AutoConfirmedSalesList";
+import { AdTitleMappingsPanel } from "@/components/pendentes/AdTitleMappingsPanel";
 import { AccountFilterBar } from "@/components/shared/AccountFilterBar";
+import { accountLabel } from "@/lib/accounts";
 import { formatDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -23,11 +31,15 @@ export default async function PendentesPage(props: PageProps<"/pendentes">) {
   const erro = typeof searchParams.ml_erro === "string" ? searchParams.ml_erro : undefined;
   const mlSellerId = typeof searchParams.conta === "string" && searchParams.conta ? searchParams.conta : undefined;
 
-  const [connections, pendingSales, stockItems] = await Promise.all([
+  const [connections, pendingSales, stockItems, autoConfirmedSales, adTitleMappings] = await Promise.all([
     listConnections(),
     listPendingSales(mlSellerId),
     listStockItemsWithStock({ onlyActive: true }),
+    listAutoConfirmedSales(),
+    listAdTitleMappings(),
   ]);
+
+  const accountLabelByMlUserId = new Map(connections.map((c) => [c.mlUserId, accountLabel(c)]));
 
   return (
     <div className="p-4 md:p-8 max-w-3xl mx-auto animate-in">
@@ -111,6 +123,10 @@ export default async function PendentesPage(props: PageProps<"/pendentes">) {
       </div>
 
       <AccountFilterBar connections={connections} current={mlSellerId} action="/pendentes" />
+
+      <AutoConfirmedSalesList sales={autoConfirmedSales} accountLabelByMlUserId={accountLabelByMlUserId} />
+
+      <AdTitleMappingsPanel mappings={adTitleMappings} stockItems={stockItems} />
 
       {stockItems.length === 0 && pendingSales.length > 0 && (
         <div className="mb-6 flex items-center gap-2 rounded-xl bg-warning-soft px-4 py-3 text-sm text-warning">
