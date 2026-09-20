@@ -191,6 +191,20 @@ export async function removeConnection(id: string): Promise<void> {
   await db.delete(mercadolivreCredentials).where(eq(mercadolivreCredentials.id, id));
 }
 
+/**
+ * Define o apelido de uma conta conectada (ex.: "Radar Ofertas", "Varejo em
+ * Movimento") — é esse apelido que aparece em todo filtro/seleção por conta
+ * (dashboard, vendas, pendentes, liberações, anúncios), via accountLabel().
+ * String vazia limpa o apelido (cai de volta em "Vendedor <id>").
+ */
+export async function updateConnectionNickname(id: string, nickname: string): Promise<void> {
+  const trimmed = nickname.trim();
+  await db
+    .update(mercadolivreCredentials)
+    .set({ nickname: trimmed.length > 0 ? trimmed : null, updatedAt: new Date() })
+    .where(eq(mercadolivreCredentials.id, id));
+}
+
 // Margem de segurança antes do vencimento real do access_token, para nunca
 // tentar usar um token que expira nos próximos segundos da requisição.
 const EXPIRY_BUFFER_MS = 2 * 60 * 1000;

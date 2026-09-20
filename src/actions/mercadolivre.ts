@@ -13,6 +13,7 @@ import {
   getValidAccessTokenForAccount,
   removeConnection,
   searchRecentOrders,
+  updateConnectionNickname,
   upsertPendingSalesFromOrder,
   SYNC_MIN_DATE,
 } from "@/lib/mercadolivre";
@@ -81,6 +82,20 @@ export async function syncRecentOrders(accountId: string): Promise<{ ok: boolean
 export async function removeMlAccount(accountId: string): Promise<void> {
   await removeConnection(accountId);
   revalidatePath("/pendentes");
+}
+
+/**
+ * Renomeia uma conta conectada (apelido usado em todo filtro por conta —
+ * dashboard, vendas, pendentes, liberações, anúncios). Botão de editar ao
+ * lado do nome da conta em /pendentes.
+ */
+export async function updateMlAccountNickname(accountId: string, nickname: string): Promise<void> {
+  await updateConnectionNickname(accountId, nickname);
+  revalidatePath("/pendentes");
+  revalidatePath("/");
+  revalidatePath("/vendas");
+  revalidatePath("/liberacoes");
+  revalidatePath("/produtos");
 }
 
 export async function listPendingSales(mlSellerId?: string) {

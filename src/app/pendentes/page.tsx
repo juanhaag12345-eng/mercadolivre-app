@@ -14,6 +14,7 @@ import { SyncRecentOrdersButton } from "@/components/pendentes/SyncRecentOrdersB
 import { RemoveMlAccountButton } from "@/components/pendentes/RemoveMlAccountButton";
 import { AutoConfirmedSalesList } from "@/components/pendentes/AutoConfirmedSalesList";
 import { AdTitleMappingsPanel } from "@/components/pendentes/AdTitleMappingsPanel";
+import { ConnectionNicknameEditor } from "@/components/pendentes/ConnectionNicknameEditor";
 import { AccountFilterBar } from "@/components/shared/AccountFilterBar";
 import { accountLabel } from "@/lib/accounts";
 import { formatDate } from "@/lib/format";
@@ -93,9 +94,11 @@ export default async function PendentesPage(props: PageProps<"/pendentes">) {
                   <Plug size={18} />
                 </span>
                 <div>
-                  <p className="text-sm font-semibold">
-                    {connection.nickname ?? "Conta do Mercado Livre conectada"}
-                  </p>
+                  <ConnectionNicknameEditor
+                    connectionId={connection.id}
+                    nickname={connection.nickname}
+                    mlUserId={connection.mlUserId}
+                  />
                   <p className="text-xs text-muted">
                     Vendedor {connection.mlUserId} · sessão válida até {formatDate(connection.expiresAt)}
                   </p>
