@@ -712,6 +712,48 @@ export const nfePendentes = pgTable(
   (table) => [index("nfe_pendentes_status_idx").on(table.status)]
 );
 
+// Saldo estimado da carteira Mercado Pago de cada conta conectada — não dá
+// pra ler um "saldo agora" pronto da API, então guardamos um ponto de
+// partida (que o usuário informa olhando o app do Mercado Pago) e vamos
+// somando por cima: toda vez que uma venda passa a "released" (ver
+// sales.moneyReleaseStatus) somamos o netAmount dela, e a cada sincronização
+// buscamos na Mercado Pago (relatório de liquidação) os saques e
+// estornos/ajustes que não aparecem em `sales` pra também entrar na conta.
+// Por isso o valor é sempre uma ESTIMATIVA "a partir da última
+// sincronização", nunca um número em tempo real ao segundo.
+export const mercadopagoBalances = pgTable("mercadopago_balances", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  mlUserId: text("ml_user_id").notNull(),
+  // Saldo informado manualmente pelo usuário (olhando o app do Mercado
+  // Pago) e a data em que ele valia — ponto de partida da conta corrente.
+  // Reiniciar (botão "corrigir saldo") só atualiza estes dois campos e some
+  // currentEstimate = baselineAmount, lastSyncedThroughDate = baselineDate.
+  baselineAmount: numeric("baseline_amount", { precision: 12, scale: 2 }).notNull(),
+  baselineDate: date("baseline_date").notNull(),
+  // Valor calculado: baseline + tudo que entrou/saiu desde então.
+  currentEstimate: numeric("current_estimate", { precision: 12, scale: 2 }).notNull(),
+  // Até que dia (inclusive) já somamos os saques/ajustes da Mercado Pago —
+  // a próxima sincronização busca o relatório a partir do dia seguinte.
+  lastSyncedThroughDate: date("last_synced_through_date").notNull(),
+  lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+  // Texto curto pra exibir na tela o que entrou na última sincronização
+  // (ex.: "2 saque(s): -R$ 429,90 · sem estornos"), sem precisar guardar
+  // linha a linha do relatório da Mercado Pago.
+  lastSyncSummary: text("last_sync_summary"),
+  // Preenchido enquanto o relatório de liquidação está sendo gerado do lado
+  // da Mercado Pago (é assíncrono, pode levar minutos) — permite retomar a
+  // sincronização numa tentativa seguinte em vez de pedir um relatório novo
+  // a cada clique.
+  pendingReportId: text("pending_report_id"),
+  pendingReportPeriodStart: date("pending_report_period_start"),
+  pendingReportPeriodEnd: date("pending_report_period_end"),
+  pendingReportRequestedAt: timestamp("pending_report_requested_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [unique("mercadopago_balances_ml_user_id_unique").on(table.mlUserId)]);
+
+export type MercadopagoBalance = typeof mercadopagoBalances.$inferSelect;
+
 export type Product = typeof products.$inferSelect;
 export type NewProduct = typeof products.$inferInsert;
 export type Sale = typeof sales.$inferSelect;

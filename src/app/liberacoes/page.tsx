@@ -1,9 +1,13 @@
 import { Wallet } from "lucide-react";
 import { Card } from "@/components/ui/Card";
-import { listLiberacoes } from "@/actions/liberacoes";
+import { listLiberacoes, getLiberacoesCalendar, getFluxoCaixaRisco } from "@/actions/liberacoes";
 import { listConnections } from "@/actions/mercadolivre";
+import { listAccountBalances } from "@/actions/mercadopago-balance";
 import { LiberacaoCard } from "@/components/liberacoes/LiberacaoCard";
 import { AtualizarLiberacoesButton } from "@/components/liberacoes/AtualizarLiberacoesButton";
+import { CalendarioLiberacoes } from "@/components/liberacoes/CalendarioLiberacoes";
+import { SaldoMercadoPagoCard } from "@/components/liberacoes/SaldoMercadoPagoCard";
+import { RiscoFluxoCaixaCard } from "@/components/liberacoes/RiscoFluxoCaixaCard";
 import { AccountFilterBar } from "@/components/shared/AccountFilterBar";
 import { formatCurrency } from "@/lib/format";
 
@@ -13,7 +17,13 @@ export default async function LiberacoesPage(props: PageProps<"/liberacoes">) {
   const searchParams = await props.searchParams;
   const mlSellerId = typeof searchParams.conta === "string" && searchParams.conta ? searchParams.conta : undefined;
 
-  const [sales, connections] = await Promise.all([listLiberacoes(mlSellerId), listConnections()]);
+  const [sales, connections, calendar, balances, fluxoCaixa] = await Promise.all([
+    listLiberacoes(mlSellerId),
+    listConnections(),
+    getLiberacoesCalendar(mlSellerId),
+    listAccountBalances(),
+    getFluxoCaixaRisco(),
+  ]);
 
   const accountLabelByMlUserId = new Map(
     connections.map((c) => [c.mlUserId, c.nickname ?? `Vendedor ${c.mlUserId}`])
@@ -33,6 +43,12 @@ export default async function LiberacoesPage(props: PageProps<"/liberacoes">) {
         </div>
         <AtualizarLiberacoesButton />
       </div>
+
+      <CalendarioLiberacoes data={calendar} />
+
+      <SaldoMercadoPagoCard accounts={balances} />
+
+      <RiscoFluxoCaixaCard data={fluxoCaixa} />
 
       <Card className="flex items-center justify-between gap-4 mb-6">
         <div className="flex items-center gap-3">
