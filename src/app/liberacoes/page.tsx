@@ -29,6 +29,17 @@ export default async function LiberacoesPage(props: PageProps<"/liberacoes">) {
     connections.map((c) => [c.mlUserId, c.nickname ?? `Vendedor ${c.mlUserId}`])
   );
 
+  // Letra de cada conta pro calendário (ex.: "R" de RADAR OFERTAS, "V" de
+  // VAREJO EM MOVIMENTO) — primeira letra do apelido. Conta sem apelido
+  // ainda cadastrado fica com "?" em vez de arriscar colidir com outra.
+  const accountInitials = Object.fromEntries(
+    connections.map((c) => [c.mlUserId, c.nickname ? c.nickname.trim().charAt(0).toUpperCase() : "?"])
+  );
+  const accountLegend = connections.map((c) => ({
+    letter: accountInitials[c.mlUserId],
+    label: c.nickname ?? `Vendedor ${c.mlUserId}`,
+  }));
+
   const total = sales.reduce((sum, s) => sum + s.netAmount, 0);
 
   return (
@@ -44,7 +55,7 @@ export default async function LiberacoesPage(props: PageProps<"/liberacoes">) {
         <AtualizarLiberacoesButton />
       </div>
 
-      <CalendarioLiberacoes data={calendar} />
+      <CalendarioLiberacoes data={calendar} accountInitials={accountInitials} legend={accountLegend} />
 
       <SaldoMercadoPagoCard accounts={balances} />
 

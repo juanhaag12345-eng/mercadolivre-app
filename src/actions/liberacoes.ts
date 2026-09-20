@@ -145,6 +145,10 @@ export interface LiberacaoCalendarDay {
   date: string; // AAAA-MM-DD
   count: number;
   total: number;
+  // Contas (mlSellerId) com liberação prevista nesse dia — usado pra marcar
+  // no calendário de qual conta é o depósito (ex.: "R", "V" ou "RV"), sem
+  // precisar abrir cada venda pra saber.
+  mlSellerIds: string[];
 }
 
 export interface LiberacaoCalendarData {
@@ -162,7 +166,7 @@ export interface LiberacaoCalendarData {
 export async function getLiberacoesCalendar(mlSellerId?: string): Promise<LiberacaoCalendarData> {
   const rows = await loadPendingReleaseSales(mlSellerId);
 
-  const byDate = new Map<string, { count: number; total: number }>();
+  const byDate = new Map<string, { count: number; total: number; mlSellerIds: Set<string> }>();
   let semPrevisaoCount = 0;
   let semPrevisaoTotal = 0;
 
@@ -173,14 +177,15 @@ export async function getLiberacoesCalendar(mlSellerId?: string): Promise<Libera
       continue;
     }
     const dateKey = toSaoPauloDateISO(row.moneyReleaseDate);
-    const entry = byDate.get(dateKey) ?? { count: 0, total: 0 };
+    const entry = byDate.get(dateKey) ?? { count: 0, total: 0, mlSellerIds: new Set<string>() };
     entry.count += 1;
     entry.total += row.netAmount;
+    if (row.mlSellerId) entry.mlSellerIds.add(row.mlSellerId);
     byDate.set(dateKey, entry);
   }
 
   const days = Array.from(byDate.entries())
-    .map(([date, v]) => ({ date, ...v }))
+    .map(([date, v]) => ({ date, count: v.count, total: v.total, mlSellerIds: Array.from(v.mlSellerIds) }))
     .sort((a, b) => a.date.localeCompare(b.date));
 
   return { days, semPrevisao: { count: semPrevisaoCount, total: semPrevisaoTotal } };

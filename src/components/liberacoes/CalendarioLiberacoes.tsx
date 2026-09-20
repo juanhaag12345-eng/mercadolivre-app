@@ -24,7 +24,19 @@ function shiftYearMonth(yearMonth: string, delta: number): string {
  * liberação mais próxima (não necessariamente o mês atual), porque é o que
  * importa primeiro.
  */
-export function CalendarioLiberacoes({ data }: { data: LiberacaoCalendarData }) {
+export function CalendarioLiberacoes({
+  data,
+  accountInitials,
+  legend,
+}: {
+  data: LiberacaoCalendarData;
+  // mlSellerId -> letra pra marcar no calendário (ex.: "R" pra RADAR
+  // OFERTAS, "V" pra VAREJO EM MOVIMENTO) — vem da primeira letra do
+  // apelido de cada conta conectada. Quando o dia tem liberação das duas
+  // contas, mostra as letras juntas (ex.: "RV").
+  accountInitials: Record<string, string>;
+  legend: { letter: string; label: string }[];
+}) {
   const byDate = useMemo(() => new Map(data.days.map((d) => [d.date, d])), [data.days]);
 
   const initialMonth = data.days.length > 0 ? yearMonthOf(data.days[0].date) : currentYearMonth();
@@ -74,6 +86,11 @@ export function CalendarioLiberacoes({ data }: { data: LiberacaoCalendarData }) 
           const day = byDate.get(date);
           const dayNumber = Number(date.slice(-2));
           const isToday = date === todayISO();
+          const letters = day
+            ? Array.from(new Set(day.mlSellerIds.map((id) => accountInitials[id] ?? "?")))
+                .sort()
+                .join("")
+            : "";
           return (
             <div
               key={date}
@@ -81,7 +98,14 @@ export function CalendarioLiberacoes({ data }: { data: LiberacaoCalendarData }) 
                 day ? "border-success/40 bg-success-soft" : "border-border bg-surface"
               } ${isToday ? "ring-2 ring-accent" : ""}`}
             >
-              <span className={`text-[11px] ${day ? "font-bold text-success" : "text-muted"}`}>{dayNumber}</span>
+              <div className="flex w-full items-center justify-between px-0.5">
+                <span className={`text-[11px] ${day ? "font-bold text-success" : "text-muted"}`}>{dayNumber}</span>
+                {letters && (
+                  <span className="rounded bg-success text-white text-[9px] font-bold leading-none px-1 py-0.5">
+                    {letters}
+                  </span>
+                )}
+              </div>
               {day && (
                 <>
                   <span className="text-[10px] font-semibold text-success leading-tight text-center">
@@ -94,6 +118,19 @@ export function CalendarioLiberacoes({ data }: { data: LiberacaoCalendarData }) 
           );
         })}
       </div>
+
+      {legend.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 mt-3 pt-3 border-t border-border">
+          {legend.map((l) => (
+            <span key={l.letter} className="flex items-center gap-1.5 text-[11px] text-muted">
+              <span className="rounded bg-success text-white text-[9px] font-bold leading-none px-1 py-0.5">
+                {l.letter}
+              </span>
+              {l.label}
+            </span>
+          ))}
+        </div>
+      )}
 
       {data.semPrevisao.count > 0 && (
         <p className="text-xs text-muted mt-3 pt-3 border-t border-border">
