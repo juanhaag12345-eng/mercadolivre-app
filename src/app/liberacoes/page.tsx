@@ -2,7 +2,7 @@ import { Wallet } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { listLiberacoes, getLiberacoesCalendar, getFluxoCaixaRisco } from "@/actions/liberacoes";
 import { listConnections } from "@/actions/mercadolivre";
-import { listAccountBalances } from "@/actions/mercadopago-balance";
+import { listAccountBalances, listManualTransactions } from "@/actions/mercadopago-balance";
 import { LiberacaoCard } from "@/components/liberacoes/LiberacaoCard";
 import { AtualizarLiberacoesButton } from "@/components/liberacoes/AtualizarLiberacoesButton";
 import { CalendarioLiberacoes } from "@/components/liberacoes/CalendarioLiberacoes";
@@ -24,6 +24,14 @@ export default async function LiberacoesPage(props: PageProps<"/liberacoes">) {
     listAccountBalances(),
     getFluxoCaixaRisco(),
   ]);
+
+  // Últimas transações manuais (compra/depósito) de cada conta — ver
+  // /components/liberacoes/SaldoMercadoPagoCard.
+  const manualTransactionsByAccount = Object.fromEntries(
+    await Promise.all(
+      connections.map(async (c) => [c.mlUserId, await listManualTransactions(c.mlUserId, 8)] as const)
+    )
+  );
 
   const accountLabelByMlUserId = new Map(
     connections.map((c) => [c.mlUserId, c.nickname ?? `Vendedor ${c.mlUserId}`])
@@ -57,7 +65,7 @@ export default async function LiberacoesPage(props: PageProps<"/liberacoes">) {
 
       <CalendarioLiberacoes data={calendar} accountInitials={accountInitials} legend={accountLegend} />
 
-      <SaldoMercadoPagoCard accounts={balances} />
+      <SaldoMercadoPagoCard accounts={balances} manualTransactionsByAccount={manualTransactionsByAccount} />
 
       <RiscoFluxoCaixaCard data={fluxoCaixa} />
 

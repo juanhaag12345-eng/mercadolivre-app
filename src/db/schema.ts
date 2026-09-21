@@ -764,6 +764,46 @@ export const mercadopagoBalances = pgTable("mercadopago_balances", {
 
 export type MercadopagoBalance = typeof mercadopagoBalances.$inferSelect;
 
+// Tipos de movimentação manual: "compra" (gasto usando o saldo da conta
+// Mercado Pago — ex.: pagar um fornecedor direto pelo saldo) ou "deposito"
+// (dinheiro entrando na conta por fora do fluxo de vendas do Mercado Livre —
+// ex.: PIX feito na conta). Ver mercadopagoManualTransactions abaixo.
+export const MANUAL_TRANSACTION_TYPES = ["compra", "deposito"] as const;
+export type ManualTransactionType = (typeof MANUAL_TRANSACTION_TYPES)[number];
+
+// Movimentações no saldo Mercado Pago que a API não tem como enxergar
+// sozinha (ver comentário de mercadopagoBalances acima: o relatório de
+// liquidação só cobre eventos de venda do Mercado Livre — liberação, saque,
+// estorno — não um PIX feito direto na conta, nem uma compra paga usando o
+// saldo do Mercado Pago fora do fluxo de compras normal). Cada registro
+// aqui soma (deposito) ou subtrai (compra) do currentEstimate na hora em
+// que é lançado — ver registrarTransacaoManual em
+// actions/mercadopago-balance.ts. Serve também de histórico/auditoria de
+// tudo que passou pelo saldo dessa forma.
+export const mercadopagoManualTransactions = pgTable(
+  "mercadopago_manual_transactions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    mlUserId: text("ml_user_id").notNull(),
+    tipo: text("tipo", { enum: MANUAL_TRANSACTION_TYPES }).notNull(),
+    // Sempre positivo — o sinal é decidido pelo `tipo` na hora de aplicar.
+    valor: numeric("valor", { precision: 12, scale: 2 }).notNull(),
+    // "Compra": qual compra foi feita. "Depósito": motivo do depósito.
+    descricao: text("descricao").notNull(),
+    // Só faz sentido pra "compra" (quem gastou o saldo) — fica null em
+    // depósitos.
+    responsavel: text("responsavel", { enum: DISPATCHERS }),
+    observacao: text("observacao"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("mercadopago_manual_transactions_ml_user_id_idx").on(table.mlUserId),
+    index("mercadopago_manual_transactions_created_at_idx").on(table.createdAt),
+  ]
+);
+
+export type MercadopagoManualTransaction = typeof mercadopagoManualTransactions.$inferSelect;
+
 export type Product = typeof products.$inferSelect;
 export type NewProduct = typeof products.$inferInsert;
 export type Sale = typeof sales.$inferSelect;

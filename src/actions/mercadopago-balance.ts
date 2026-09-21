@@ -1,9 +1,16 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq, gte, isNotNull, lte } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, lte } from "drizzle-orm";
 import { db } from "@/db";
-import { mercadolivreCredentials, mercadopagoBalances, sales } from "@/db/schema";
+import {
+  mercadolivreCredentials,
+  mercadopagoBalances,
+  mercadopagoManualTransactions,
+  sales,
+  type Dispatcher,
+  type ManualTransactionType,
+} from "@/db/schema";
 import { getValidAccessTokenForAccount } from "@/lib/mercadolivre";
 import { withFinancials } from "@/lib/sale-financials";
 import { toNumber } from "@/lib/calculations";
@@ -92,6 +99,135 @@ export async function setBalanceBaseline(mlUserId: string, amount: number): Prom
         updatedAt: new Date(),
       },
     });
+  revalidatePath("/liberacoes");
+}
+
+export interface ManualTransactionRow {
+  id: string;
+  mlUserId: string;
+  tipo: ManualTransactionType;
+  valor: number;
+  descricao: string;
+  responsavel: Dispatcher | null;
+  observacao: string | null;
+  createdAt: Date;
+}
+
+/**
+ * Últimas movimentações manuais lançadas (compra usando o saldo, ou
+ * depósito feito direto na conta) — pra mostrar o histórico em
+ * /liberacoes, por conta. Ver mercadopagoManualTransactions no schema.
+ */
+export async function listManualTransactions(mlUserId?: string, limit = 10): Promise<ManualTransactionRow[]> {
+  const condition = mlUserId ? eq(mercadopagoManualTransactions.mlUserId, mlUserId) : undefined;
+  const rows = await db
+    .select()
+    .from(mercadopagoManualTransactions)
+    .where(condition)
+    .orderBy(desc(mercadopagoManualTransactions.createdAt))
+    .limit(limit);
+
+  return rows.map((r) => ({
+    id: r.id,
+    mlUserId: r.mlUserId,
+    tipo: r.tipo,
+    valor: toNumber(r.valor),
+    descricao: r.descricao,
+    responsavel: r.responsavel,
+    observacao: r.observacao,
+    createdAt: r.createdAt,
+  }));
+}
+
+export interface RegistrarTransacaoManualInput {
+  mlUserId: string;
+  tipo: ManualTransactionType;
+  valor: number;
+  descricao: string;
+  responsavel?: Dispatcher | null;
+  observacao?: string | null;
+}
+
+/**
+ * Registra uma movimentação manual no saldo Mercado Pago — pra tudo que
+ * mexe no saldo da conta MAS não passa pelo fluxo normal de vendas do
+ * Mercado Livre e por isso a sincronização automática (ver
+ * syncAccountBalance) nunca vai enxergar sozinha: um PIX feito direto na
+ * conta (soma) ou uma compra paga usando o saldo do Mercado Pago (subtrai).
+ * Aplica direto em cima do currentEstimate já calculado, sem mexer no
+ * baseline nem no histórico de sincronização — é um ajuste independente.
+ */
+export async function registrarTransacaoManual(
+  input: RegistrarTransacaoManualInput
+): Promise<{ ok: boolean; message: string }> {
+  if (!Number.isFinite(input.valor) || input.valor <= 0) {
+    return { ok: false, message: "Informe um valor válido, maior que zero." };
+  }
+  if (!input.descricao.trim()) {
+    return {
+      ok: false,
+      message: input.tipo === "compra" ? "Descreva qual compra foi realizada." : "Descreva o motivo do depósito.",
+    };
+  }
+
+  const [balance] = await db
+    .select()
+    .from(mercadopagoBalances)
+    .where(eq(mercadopagoBalances.mlUserId, input.mlUserId))
+    .limit(1);
+  if (!balance) {
+    return { ok: false, message: "Defina o saldo inicial dessa conta antes de lançar uma transação manual." };
+  }
+
+  await db.insert(mercadopagoManualTransactions).values({
+    mlUserId: input.mlUserId,
+    tipo: input.tipo,
+    valor: input.valor.toString(),
+    descricao: input.descricao.trim(),
+    responsavel: input.tipo === "compra" ? (input.responsavel ?? null) : null,
+    observacao: input.observacao?.trim() || null,
+  });
+
+  const delta = input.tipo === "deposito" ? input.valor : -input.valor;
+  const newEstimate = toNumber(balance.currentEstimate) + delta;
+  await db
+    .update(mercadopagoBalances)
+    .set({ currentEstimate: newEstimate.toString(), updatedAt: new Date() })
+    .where(eq(mercadopagoBalances.mlUserId, input.mlUserId));
+
+  revalidatePath("/liberacoes");
+  return { ok: true, message: "Transação registrada." };
+}
+
+/**
+ * Desfaz uma movimentação manual: reverte o efeito dela no currentEstimate
+ * (soma de volta se era compra, subtrai se era depósito) e apaga o
+ * registro — pra corrigir um lançamento feito errado.
+ */
+export async function excluirTransacaoManual(id: string): Promise<void> {
+  const [transacao] = await db
+    .select()
+    .from(mercadopagoManualTransactions)
+    .where(eq(mercadopagoManualTransactions.id, id))
+    .limit(1);
+  if (!transacao) return;
+
+  const [balance] = await db
+    .select()
+    .from(mercadopagoBalances)
+    .where(eq(mercadopagoBalances.mlUserId, transacao.mlUserId))
+    .limit(1);
+
+  if (balance) {
+    const reversal = transacao.tipo === "deposito" ? -toNumber(transacao.valor) : toNumber(transacao.valor);
+    const newEstimate = toNumber(balance.currentEstimate) + reversal;
+    await db
+      .update(mercadopagoBalances)
+      .set({ currentEstimate: newEstimate.toString(), updatedAt: new Date() })
+      .where(eq(mercadopagoBalances.mlUserId, transacao.mlUserId));
+  }
+
+  await db.delete(mercadopagoManualTransactions).where(eq(mercadopagoManualTransactions.id, id));
   revalidatePath("/liberacoes");
 }
 
