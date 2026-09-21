@@ -2,12 +2,13 @@
 
 import { useActionState, useState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
-import { Check, ChevronDown, ChevronRight, Loader2, Pencil, Sparkles, Trash2, X } from "lucide-react";
+import { Boxes, Check, ChevronDown, ChevronRight, Loader2, Pencil, Sparkles, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Card";
 import { IntegerInput, Input, Label, MoneyInput, Select } from "@/components/ui/Field";
 import { PriceHistoryPanel } from "@/components/compras/PriceHistoryPanel";
 import {
+  adjustStockItemStock,
   deleteStockItem,
   dismissNovoStockItem,
   toggleStockItemActive,
@@ -28,6 +29,7 @@ export function StockItemRow({
   analytics?: StockItemAnalytics;
 }) {
   const [editing, setEditing] = useState(false);
+  const [adjusting, setAdjusting] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const updateAction = updateStockItem.bind(null, item.id);
   const [state, formAction] = useActionState<ActionResult | null, FormData>(updateAction, null);
@@ -53,6 +55,22 @@ export function StockItemRow({
   if (state !== handledState) {
     setHandledState(state);
     if (state?.ok) setEditing(false);
+  }
+
+  // Ajuste manual de estoque (contagem física, perda, quebra etc.) — form
+  // separado do de edição de cadastro, pra não misturar os dois fluxos.
+  const adjustAction = adjustStockItemStock.bind(null, item.id);
+  const [adjustState, adjustFormAction] = useActionState<ActionResult | null, FormData>(adjustAction, null);
+  const adjustErrors = adjustState && !adjustState.ok ? adjustState.errors : {};
+  const [newStock, setNewStock] = useState(item.currentStock);
+  const [adjustReason, setAdjustReason] = useState("");
+  const [handledAdjustState, setHandledAdjustState] = useState(adjustState);
+  if (adjustState !== handledAdjustState) {
+    setHandledAdjustState(adjustState);
+    if (adjustState?.ok) {
+      setAdjusting(false);
+      setAdjustReason("");
+    }
   }
 
   if (editing) {
@@ -110,6 +128,43 @@ export function StockItemRow({
             </div>
             <SaveButton />
             <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(false)}>
+              <X size={14} />
+            </Button>
+          </form>
+        </td>
+      </tr>
+    );
+  }
+
+  if (adjusting) {
+    return (
+      <tr className="border-b border-border last:border-0 bg-surface-muted/40">
+        <td colSpan={7} className="px-4 py-3">
+          <form action={adjustFormAction} className="flex flex-wrap items-end gap-3">
+            <div>
+              <Label>Item</Label>
+              <span className="flex h-10 items-center text-sm font-medium">{item.name}</span>
+            </div>
+            <div>
+              <Label hint="agora">Estoque atual</Label>
+              <span className="flex h-10 items-center text-muted text-sm">{item.currentStock} un.</span>
+            </div>
+            <div className="w-32">
+              <Label hint="contagem real">Novo estoque</Label>
+              <IntegerInput name="newStock" min={0} value={newStock} onValueChange={setNewStock} error={adjustErrors.newStock} />
+            </div>
+            <div className="min-w-[200px] flex-1">
+              <Label hint="opcional">Motivo</Label>
+              <Input
+                name="reason"
+                value={adjustReason}
+                onChange={(e) => setAdjustReason(e.target.value)}
+                placeholder="ex: contagem física, perda, quebra, avaria"
+              />
+            </div>
+            {adjustErrors.form && <p className="text-xs text-danger w-full">{adjustErrors.form}</p>}
+            <AdjustSaveButton />
+            <Button type="button" variant="ghost" size="sm" onClick={() => setAdjusting(false)}>
               <X size={14} />
             </Button>
           </form>
@@ -184,6 +239,18 @@ export function StockItemRow({
             </button>
             <button
               type="button"
+              title="Ajustar estoque manualmente"
+              onClick={() => {
+                setNewStock(item.currentStock);
+                setAdjustReason("");
+                setAdjusting(true);
+              }}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-surface-muted transition-colors"
+            >
+              <Boxes size={14} />
+            </button>
+            <button
+              type="button"
               title={item.active ? "Desativar item" : "Reativar item"}
               disabled={isTogglingActive}
               onClick={() => startToggleTransition(() => toggleStockItemActive(item.id, !item.active))}
@@ -234,6 +301,15 @@ function SaveButton() {
   return (
     <Button type="submit" variant="secondary" size="sm" disabled={pending}>
       {pending ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+    </Button>
+  );
+}
+
+function AdjustSaveButton() {
+  const { pending } = useFormStatus();
+  return (
+    <Button type="submit" variant="secondary" size="sm" disabled={pending}>
+      {pending ? <Loader2 size={14} className="animate-spin" /> : "Ajustar"}
     </Button>
   );
 }

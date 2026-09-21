@@ -259,6 +259,29 @@ export const stockPurchases = pgTable(
   ]
 );
 
+// Ajuste manual de estoque — corrige o "estoque atual" (compras - vendas)
+// pra bater com a contagem física real, sem inventar uma compra ou venda
+// fictícia. Guardamos a diferença aplicada (quantity, pode ser negativa)
+// junto com o estoque antes/depois no momento do ajuste, pra manter
+// histórico auditável de quando e por que alguém corrigiu o número —
+// ver /controle-estoque.
+export const stockAdjustments = pgTable(
+  "stock_adjustments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    stockItemId: uuid("stock_item_id")
+      .notNull()
+      .references(() => stockItems.id, { onDelete: "cascade" }),
+    quantity: integer("quantity").notNull(),
+    previousStock: integer("previous_stock").notNull(),
+    newStock: integer("new_stock").notNull(),
+    reason: text("reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("stock_adjustments_item_idx").on(table.stockItemId)]
+);
+export type StockAdjustment = typeof stockAdjustments.$inferSelect;
+
 export const sales = pgTable(
   "sales",
   {

@@ -18,10 +18,11 @@ export default async function CadastroProdutosPage() {
   return (
     <div className="p-4 md:p-8 max-w-5xl mx-auto animate-in">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold">Produtos</h1>
+        <h1 className="text-2xl font-bold">Controle de Estoque</h1>
         <p className="text-sm text-muted mt-0.5">
-          Cadastre, visualize, edite e exclua os produtos controlados por estoque — usados tanto nas compras quanto
-          para dar baixa em vendas do Mercado Livre confirmadas em Pendentes.
+          Cadastre, visualize, edite e exclua os produtos controlados por estoque, e ajuste manualmente a quantidade
+          quando a contagem física não bater com o calculado — usados tanto nas compras quanto para dar baixa em
+          vendas do Mercado Livre confirmadas em Pendentes.
         </p>
       </div>
 

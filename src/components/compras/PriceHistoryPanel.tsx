@@ -15,6 +15,10 @@ import { formatCurrency, formatDate } from "@/lib/format";
 import { PAYMENT_METHOD_LABELS, PURCHASE_ORIGIN_LABELS, type PaymentMethod } from "@/db/schema";
 import type { StockItemAnalytics } from "@/actions/stock";
 
+function formatDateTime(date: Date): string {
+  return new Date(date).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
 const COLORS = {
   price: "#eb6834",
   volume: "#2a78d6",
@@ -29,15 +33,54 @@ const COLORS = {
  * estou pagando mais barato" e "o preço tá afetando as vendas".
  */
 export function PriceHistoryPanel({ analytics }: { analytics: StockItemAnalytics }) {
-  const { history, stats, chart } = analytics;
+  const { history, stats, chart, adjustments } = analytics;
   const hasChartData = chart.some((p) => p.avgPrice !== null || p.quantitySold > 0);
 
-  if (history.length === 0) {
+  if (history.length === 0 && adjustments.length === 0) {
     return <p className="text-sm text-muted py-4 text-center">Nenhuma compra registrada pra esse item ainda.</p>;
   }
 
   return (
     <div className="space-y-4">
+      {adjustments.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-muted mb-1.5">Ajustes manuais de estoque</p>
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-muted border-b border-border bg-surface-muted/60">
+                  <th className="px-3 py-2 font-medium">Data</th>
+                  <th className="px-3 py-2 font-medium">De</th>
+                  <th className="px-3 py-2 font-medium">Para</th>
+                  <th className="px-3 py-2 font-medium">Diferença</th>
+                  <th className="px-3 py-2 font-medium">Motivo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {adjustments.map((a) => (
+                  <tr key={a.id} className="border-b border-border last:border-0">
+                    <td className="px-3 py-2 whitespace-nowrap">{formatDateTime(a.createdAt)}</td>
+                    <td className="px-3 py-2">{a.previousStock} un.</td>
+                    <td className="px-3 py-2">{a.newStock} un.</td>
+                    <td className="px-3 py-2">
+                      <Badge tone={a.quantity > 0 ? "success" : "danger"}>
+                        {a.quantity > 0 ? "+" : ""}
+                        {a.quantity} un.
+                      </Badge>
+                    </td>
+                    <td className="px-3 py-2 text-muted">{a.reason ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {history.length === 0 ? (
+        <p className="text-sm text-muted py-2 text-center">Nenhuma compra registrada pra esse item ainda.</p>
+      ) : (
+        <>
       {stats && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <StatMini label="Menor preço" value={formatCurrency(stats.min)} />
@@ -128,6 +171,8 @@ export function PriceHistoryPanel({ analytics }: { analytics: StockItemAnalytics
           </table>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }

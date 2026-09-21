@@ -12,7 +12,7 @@ const links = [
   { href: "/pendentes", label: "Pendentes", icon: Inbox },
   { href: "/liberacoes", label: "Liberações", icon: Wallet },
   { href: "/compras", label: "Compras/Estoque", icon: ShoppingCart },
-  { href: "/cadastro-produtos", label: "Produtos", icon: Package },
+  { href: "/cadastro-produtos", label: "Controle de Estoque", icon: Package },
   { href: "/notas-fiscais", label: "Notas Fiscais", icon: FileText },
   { href: "/produtos", label: "Anúncios", icon: Megaphone },
   { href: "/custo-fornecimento", label: "Custo Fornecimento", icon: Boxes },

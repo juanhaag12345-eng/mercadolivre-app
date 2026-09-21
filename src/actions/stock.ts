@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { asc, desc, eq, gt, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { sales, stockItems, stockPurchases, type PaymentStatus, type SaleUnitType } from "@/db/schema";
+import { sales, stockAdjustments, stockItems, stockPurchases, type PaymentStatus, type SaleUnitType } from "@/db/schema";
 import { stockItemSchema, stockPurchaseSchema } from "@/lib/validations";
 import { toNumber } from "@/lib/calculations";
 import { addDays, daysBetweenInclusive } from "@/lib/dates";
@@ -29,12 +29,14 @@ export interface StockItemRow {
 
 /**
  * Lista os itens de estoque com a quantidade atual calculada na hora
- * (compras somadas menos vendas do Mercado Livre já ligadas ao item) — não
- * guardamos um saldo pronto no banco pra nunca correr o risco de ele
- * dessincronizar do histórico real de compras/vendas.
+ * (compras somadas menos vendas do Mercado Livre já ligadas ao item, mais
+ * qualquer ajuste manual registrado) — não guardamos um saldo pronto no
+ * banco pra nunca correr o risco de ele dessincronizar do histórico real de
+ * compras/vendas; o ajuste manual entra como mais um item desse histórico
+ * em vez de sobrescrever o cálculo.
  */
 export async function listStockItemsWithStock(opts: { onlyActive?: boolean } = {}): Promise<StockItemRow[]> {
-  const [items, purchaseRows, saleRows] = await Promise.all([
+  const [items, purchaseRows, saleRows, adjustmentRows] = await Promise.all([
     db.select().from(stockItems).orderBy(asc(stockItems.name)),
     db
       .select({ stockItemId: stockPurchases.stockItemId, quantity: stockPurchases.quantity })
@@ -43,6 +45,7 @@ export async function listStockItemsWithStock(opts: { onlyActive?: boolean } = {
       .select({ stockItemId: sales.stockItemId, quantity: sales.quantity })
       .from(sales)
       .where(isNotNull(sales.stockItemId)),
+    db.select({ stockItemId: stockAdjustments.stockItemId, quantity: stockAdjustments.quantity }).from(stockAdjustments),
   ]);
 
   const purchasedByItem = new Map<string, number>();
@@ -54,9 +57,14 @@ export async function listStockItemsWithStock(opts: { onlyActive?: boolean } = {
     if (!row.stockItemId) continue;
     soldByItem.set(row.stockItemId, (soldByItem.get(row.stockItemId) ?? 0) + row.quantity);
   }
+  const adjustedByItem = new Map<string, number>();
+  for (const row of adjustmentRows) {
+    adjustedByItem.set(row.stockItemId, (adjustedByItem.get(row.stockItemId) ?? 0) + row.quantity);
+  }
 
   const rows: StockItemRow[] = items.map((item) => {
-    const currentStock = (purchasedByItem.get(item.id) ?? 0) - (soldByItem.get(item.id) ?? 0);
+    const currentStock =
+      (purchasedByItem.get(item.id) ?? 0) - (soldByItem.get(item.id) ?? 0) + (adjustedByItem.get(item.id) ?? 0);
     return {
       id: item.id,
       internalCode: item.internalCode,
@@ -239,6 +247,71 @@ export async function dismissNovoStockItem(id: string) {
   await db.update(stockItems).set({ criadoAutomaticamente: false, updatedAt: new Date() }).where(eq(stockItems.id, id));
   revalidatePath("/compras");
   revalidatePath("/cadastro-produtos");
+}
+
+export interface StockAdjustmentRow {
+  id: string;
+  quantity: number;
+  previousStock: number;
+  newStock: number;
+  reason: string | null;
+  createdAt: Date;
+}
+
+/**
+ * Corrige manualmente o estoque atual de um item pra bater com a contagem
+ * física real (perda, quebra, avaria, extravio, ou simplesmente conferência
+ * de estoque). Em vez de guardar um saldo fixo no banco, calcula a
+ * diferença entre o estoque atual (compras - vendas + ajustes já feitos) e
+ * o valor informado, e grava só essa diferença como um novo registro —
+ * assim o cálculo em `listStockItemsWithStock` passa a bater exatamente com
+ * o valor informado, mantendo o histórico de compras/vendas intacto.
+ */
+export async function adjustStockItemStock(
+  stockItemId: string,
+  _prevState: ActionResult | null,
+  formData: FormData
+): Promise<ActionResult> {
+  const rawNewStock = formData.get("newStock");
+  const newStock = Number(rawNewStock);
+  const reason = String(formData.get("reason") ?? "").trim();
+
+  if (rawNewStock === null || rawNewStock === "" || !Number.isInteger(newStock) || newStock < 0) {
+    return { ok: false, errors: { newStock: "Informe um número inteiro de unidades (0 ou mais)." } };
+  }
+
+  const items = await listStockItemsWithStock();
+  const current = items.find((i) => i.id === stockItemId);
+  if (!current) return { ok: false, errors: { form: "Esse item não existe mais." } };
+
+  const previousStock = current.currentStock;
+  const quantity = newStock - previousStock;
+  if (quantity === 0) {
+    return { ok: false, errors: { newStock: "Esse já é o estoque atual — nada pra ajustar." } };
+  }
+
+  await db.insert(stockAdjustments).values({
+    stockItemId,
+    quantity,
+    previousStock,
+    newStock,
+    reason: reason || null,
+  });
+
+  revalidatePath("/compras");
+  revalidatePath("/cadastro-produtos");
+  revalidatePath("/pendentes");
+  revalidatePath("/");
+  return { ok: true };
+}
+
+/** Desfaz um ajuste manual (exclui o registro — o estoque calculado volta a ser o de antes do ajuste). */
+export async function deleteStockAdjustment(id: string) {
+  await db.delete(stockAdjustments).where(eq(stockAdjustments.id, id));
+  revalidatePath("/compras");
+  revalidatePath("/cadastro-produtos");
+  revalidatePath("/pendentes");
+  revalidatePath("/");
 }
 
 export interface PurchaseRow {
@@ -434,6 +507,7 @@ export interface StockItemAnalytics {
   history: PurchaseRow[];
   stats: PriceStats | null;
   chart: PriceChartPoint[];
+  adjustments: StockAdjustmentRow[];
 }
 
 const CHART_MONTHS_BACK = 6;
@@ -465,7 +539,7 @@ export async function getStockAnalytics(): Promise<Record<string, StockItemAnaly
   const months = lastNYearMonths(CHART_MONTHS_BACK);
   const monthIndex = new Map(months.map((m, i) => [m, i]));
 
-  const [purchases, salesRows] = await Promise.all([
+  const [purchases, salesRows, adjustmentRows] = await Promise.all([
     db
       .select({
         id: stockPurchases.id,
@@ -492,6 +566,7 @@ export async function getStockAnalytics(): Promise<Record<string, StockItemAnaly
       .select({ stockItemId: sales.stockItemId, quantity: sales.quantity, saleDate: sales.saleDate })
       .from(sales)
       .where(isNotNull(sales.stockItemId)),
+    db.select().from(stockAdjustments).orderBy(desc(stockAdjustments.createdAt)),
   ]);
 
   const byItem = new Map<string, PurchaseRow[]>();
@@ -534,8 +609,15 @@ export async function getStockAnalytics(): Promise<Record<string, StockItemAnaly
     salesByItemMonth.set(row.stockItemId, perMonth);
   }
 
+  const adjustmentsByItem = new Map<string, StockAdjustmentRow[]>();
+  for (const row of adjustmentRows) {
+    const list = adjustmentsByItem.get(row.stockItemId) ?? [];
+    list.push(row);
+    adjustmentsByItem.set(row.stockItemId, list);
+  }
+
   const result: Record<string, StockItemAnalytics> = {};
-  const allItemIds = new Set<string>([...byItem.keys(), ...salesByItemMonth.keys()]);
+  const allItemIds = new Set<string>([...byItem.keys(), ...salesByItemMonth.keys(), ...adjustmentsByItem.keys()]);
   for (const itemId of allItemIds) {
     const history = byItem.get(itemId) ?? [];
     let stats: PriceStats | null = null;
@@ -563,7 +645,7 @@ export async function getStockAnalytics(): Promise<Record<string, StockItemAnaly
       };
     });
 
-    result[itemId] = { history, stats, chart };
+    result[itemId] = { history, stats, chart, adjustments: adjustmentsByItem.get(itemId) ?? [] };
   }
 
   return result;

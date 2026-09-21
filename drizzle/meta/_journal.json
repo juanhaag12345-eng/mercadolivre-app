@@ -169,6 +169,13 @@
       "when": 1790026774948,
       "tag": "0023_fantastic_red_shift",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1790027721589,
+      "tag": "0024_odd_maverick",
+      "breakpoints": true
     }
   ]
 }
