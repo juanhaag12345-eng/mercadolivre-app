@@ -143,3 +143,14 @@ export function toNumber(value: string | number | null | undefined): number {
   const parsed = parseFloat(value);
   return Number.isFinite(parsed) ? parsed : 0;
 }
+
+// Uma venda é considerada "garantida" quando o Mercado Envios já marcou a
+// mercadoria como entregue ao cliente — nesse ponto o risco de
+// cancelamento/estorno cai bastante, mesmo que o dinheiro ainda não tenha
+// sido liberado na conta (ver sales.shippingStatus, atualizado em
+// atualizarLiberacoes, actions/liberacoes.ts). Vive aqui (e não no arquivo
+// "use server" de liberacoes) porque Server Actions só podem exportar
+// funções assíncronas.
+export function isGarantida(shippingStatus: string | null): boolean {
+  return shippingStatus === "delivered";
+}

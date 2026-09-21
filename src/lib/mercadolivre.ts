@@ -364,6 +364,39 @@ async function fetchReceiverName(
   return data.destination?.receiver_name ?? null;
 }
 
+interface MlShipmentStatus {
+  status?: string;
+  substatus?: string | null;
+}
+
+// Status de envio que não mudam mais depois de alcançados — uma vez
+// verificado um desses, não precisa consultar de novo nas próximas
+// sincronizações (ver atualizarLiberacoes em actions/liberacoes.ts).
+export const SHIPPING_STATUS_TERMINAL = ["delivered", "not_delivered", "cancelled"] as const;
+
+/**
+ * Busca o status atual do envio (GET /shipments/$id, com "x-format-new: true"
+ * — obrigatório desde out/2025) — usado pra saber se a mercadoria já foi
+ * "delivered" (entregue ao cliente), o que torna o dinheiro da venda bem
+ * menos sujeito a estorno/cancelamento mesmo antes de liberado na conta (ver
+ * /liberacoes, coluna "garantida"). Outros valores possíveis: pending,
+ * handling, ready_to_ship, shipped, not_delivered, cancelled, etc.
+ */
+export async function fetchShipmentStatus(
+  shipmentId: number,
+  accessToken: string
+): Promise<string | null> {
+  const response = await fetch(`${ML_API_BASE}/shipments/${shipmentId}`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "x-format-new": "true",
+    },
+  });
+  if (!response.ok) return null;
+  const data = (await response.json()) as MlShipmentStatus;
+  return data.status ?? null;
+}
+
 export async function fetchOrder(orderId: string | number, accessToken: string): Promise<MlOrder> {
   const response = await fetch(`${ML_API_BASE}/orders/${orderId}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -668,6 +701,53 @@ export async function fetchPaymentReleaseInfo(
     batch.forEach((id, idx) => {
       const info = infos[idx];
       if (info) result.set(id, info);
+    });
+  }
+
+  return result;
+}
+
+// Mesma lógica de lotes paralelos do fetchPaymentReleaseInfo acima, mas para
+// status de envio — por pedido (não existe mlShipmentId salvo em `sales`,
+// então cada consulta é: GET /orders/$id pra achar o shipping.id, depois GET
+// /shipments/$id pra pegar o status). Duas chamadas por pedido, por isso a
+// concorrência é um pouco menor que a de pagamentos.
+const SHIPPING_STATUS_LOOKUP_CONCURRENCY = 5;
+
+async function fetchSingleShippingStatus(
+  orderId: string,
+  accessToken: string
+): Promise<string | null> {
+  try {
+    const order = await fetchOrder(orderId, accessToken);
+    const shipmentId = order.shipping?.id;
+    if (!shipmentId) return null;
+    return await fetchShipmentStatus(shipmentId, accessToken);
+  } catch (err) {
+    console.error(`[liberacoes] erro ao consultar status de envio do pedido ${orderId}:`, err);
+    return null;
+  }
+}
+
+/**
+ * Consulta, para uma lista de IDs de pedido de UM MESMO vendedor, o status
+ * atual do envio (ver fetchShipmentStatus) — usado pra marcar em
+ * /liberacoes quais vendas já têm a mercadoria entregue ("garantida").
+ * Pedidos que falharem na consulta (ou sem envio associado) ficam de fora do
+ * Map retornado.
+ */
+export async function fetchShippingStatusInfo(
+  orderIds: string[],
+  accessToken: string
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+
+  for (let i = 0; i < orderIds.length; i += SHIPPING_STATUS_LOOKUP_CONCURRENCY) {
+    const batch = orderIds.slice(i, i + SHIPPING_STATUS_LOOKUP_CONCURRENCY);
+    const statuses = await Promise.all(batch.map((id) => fetchSingleShippingStatus(id, accessToken)));
+    batch.forEach((id, idx) => {
+      const status = statuses[idx];
+      if (status) result.set(id, status);
     });
   }
 

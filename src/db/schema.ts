@@ -413,6 +413,16 @@ export const sales = pgTable(
     // ter sido verificada).
     moneyReleaseCheckedAt: timestamp("money_release_checked_at", { withTimezone: true }),
 
+    // --- Status de entrega do envio (Mercado Envios) — ver /liberacoes ---
+    // Consultado em GET /shipments/$id (status: pending, handling,
+    // ready_to_ship, shipped, delivered, not_delivered, cancelled, ...) —
+    // usado pra marcar em /liberacoes quais vendas já estão "garantidas"
+    // (mercadoria já entregue ao cliente, dinheiro com bem menos risco de
+    // estorno/cancelamento) mesmo que o dinheiro ainda não tenha sido
+    // liberado na conta. Null até a primeira consulta.
+    shippingStatus: text("shipping_status"),
+    shippingStatusCheckedAt: timestamp("shipping_status_checked_at", { withTimezone: true }),
+
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

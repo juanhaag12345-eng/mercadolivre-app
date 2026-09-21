@@ -5,8 +5,13 @@ import { and, eq, isNull, ne, or } from "drizzle-orm";
 import { db } from "@/db";
 import { mercadopagoBalances, sales } from "@/db/schema";
 import { withFinancials, type SaleWithFinancials } from "@/lib/sale-financials";
-import { getValidAccessTokenForAccount, fetchPaymentReleaseInfo } from "@/lib/mercadolivre";
-import { toNumber } from "@/lib/calculations";
+import {
+  getValidAccessTokenForAccount,
+  fetchPaymentReleaseInfo,
+  fetchShippingStatusInfo,
+  SHIPPING_STATUS_TERMINAL,
+} from "@/lib/mercadolivre";
+import { toNumber, isGarantida } from "@/lib/calculations";
 import { toSaoPauloDateISO } from "@/lib/dates";
 import { todayISO } from "@/lib/format";
 import { listPurchases } from "@/actions/stock";
@@ -66,6 +71,12 @@ export async function getPendingReleaseSummary(mlSellerId?: string): Promise<{ c
  * conta. Vendas sem mlSellerId e/ou mlPaymentId identificados (confirmadas
  * antes dessas colunas existirem) são ignoradas — não tem como saber de qual
  * conta usar o token, ou qual pagamento consultar.
+ *
+ * De quebra, aproveita a mesma passada pra também consultar o status do
+ * envio (ver fetchShippingStatusInfo) de quem ainda não tem um status
+ * "final" salvo (delivered/not_delivered/cancelled não mudam mais, então não
+ * precisam ser consultados de novo) — é o que alimenta a marca de "garantida"
+ * em /liberacoes (mercadoria já entregue ao cliente).
  */
 export async function atualizarLiberacoes(): Promise<{ ok: boolean; message: string }> {
   const rows = await db.select().from(sales).where(notReleasedCondition());
@@ -95,6 +106,8 @@ export async function atualizarLiberacoes(): Promise<{ ok: boolean; message: str
 
   let updated = 0;
   let released = 0;
+  let shippingUpdated = 0;
+  let delivered = 0;
   const errors: string[] = [];
 
   for (const [sellerId, sellerRows] of bySeller) {
@@ -118,6 +131,29 @@ export async function atualizarLiberacoes(): Promise<{ ok: boolean; message: str
         updated += 1;
         if (releaseInfo.moneyReleaseStatus === "released") released += 1;
       }
+
+      // Status de envio: só consulta de novo quem ainda não chegou a um
+      // status final, e só quem tem o pedido identificado (mlOrderId).
+      const needsShippingCheck = sellerRows.filter(
+        (row): row is typeof row & { mlOrderId: string } =>
+          Boolean(row.mlOrderId) &&
+          !SHIPPING_STATUS_TERMINAL.includes(row.shippingStatus as (typeof SHIPPING_STATUS_TERMINAL)[number])
+      );
+      if (needsShippingCheck.length > 0) {
+        const orderIds = Array.from(new Set(needsShippingCheck.map((r) => r.mlOrderId)));
+        const shippingInfo = await fetchShippingStatusInfo(orderIds, accessToken);
+
+        for (const row of needsShippingCheck) {
+          const status = shippingInfo.get(row.mlOrderId);
+          if (!status || status === row.shippingStatus) continue;
+          await db
+            .update(sales)
+            .set({ shippingStatus: status, shippingStatusCheckedAt: new Date(), updatedAt: new Date() })
+            .where(eq(sales.id, row.id));
+          shippingUpdated += 1;
+          if (status === "delivered") delivered += 1;
+        }
+      }
     } catch (err) {
       errors.push(err instanceof Error ? err.message : "erro desconhecido");
     }
@@ -127,15 +163,16 @@ export async function atualizarLiberacoes(): Promise<{ ok: boolean; message: str
   revalidatePath("/");
 
   const skippedNote = skippedIncomplete > 0 ? ` (${skippedIncomplete} sem conta/pagamento identificado, ignorada(s))` : "";
+  const shippingNote = shippingUpdated > 0 ? ` ${delivered} entrega(s) confirmada(s) agora.` : "";
   if (errors.length > 0) {
     return {
       ok: updated > 0,
-      message: `${updated} venda(s) verificada(s), ${released} já liberada(s)${skippedNote}. Erros: ${errors.join("; ")}`,
+      message: `${updated} venda(s) verificada(s), ${released} já liberada(s)${skippedNote}.${shippingNote} Erros: ${errors.join("; ")}`,
     };
   }
   return {
     ok: true,
-    message: `${updated} venda(s) verificada(s), ${released} já liberada(s)${skippedNote}.`,
+    message: `${updated} venda(s) verificada(s), ${released} já liberada(s)${skippedNote}.${shippingNote}`,
   };
 }
 
@@ -149,6 +186,12 @@ export interface LiberacaoCalendarDay {
   // no calendário de qual conta é o depósito (ex.: "R", "V" ou "RV"), sem
   // precisar abrir cada venda pra saber.
   mlSellerIds: string[];
+  // Quantas dessas vendas (e quanto do total) já estão "garantidas" —
+  // mercadoria confirmada como entregue pelo Mercado Envios (ver
+  // isGarantida) — pra mostrar no calendário quanto daquele dia já não
+  // corre risco de cancelamento/estorno.
+  garantidoCount: number;
+  garantidoTotal: number;
 }
 
 export interface LiberacaoCalendarData {
@@ -166,7 +209,10 @@ export interface LiberacaoCalendarData {
 export async function getLiberacoesCalendar(mlSellerId?: string): Promise<LiberacaoCalendarData> {
   const rows = await loadPendingReleaseSales(mlSellerId);
 
-  const byDate = new Map<string, { count: number; total: number; mlSellerIds: Set<string> }>();
+  const byDate = new Map<
+    string,
+    { count: number; total: number; mlSellerIds: Set<string>; garantidoCount: number; garantidoTotal: number }
+  >();
   let semPrevisaoCount = 0;
   let semPrevisaoTotal = 0;
 
@@ -177,15 +223,27 @@ export async function getLiberacoesCalendar(mlSellerId?: string): Promise<Libera
       continue;
     }
     const dateKey = toSaoPauloDateISO(row.moneyReleaseDate);
-    const entry = byDate.get(dateKey) ?? { count: 0, total: 0, mlSellerIds: new Set<string>() };
+    const entry =
+      byDate.get(dateKey) ?? { count: 0, total: 0, mlSellerIds: new Set<string>(), garantidoCount: 0, garantidoTotal: 0 };
     entry.count += 1;
     entry.total += row.netAmount;
     if (row.mlSellerId) entry.mlSellerIds.add(row.mlSellerId);
+    if (isGarantida(row.shippingStatus)) {
+      entry.garantidoCount += 1;
+      entry.garantidoTotal += row.netAmount;
+    }
     byDate.set(dateKey, entry);
   }
 
   const days = Array.from(byDate.entries())
-    .map(([date, v]) => ({ date, count: v.count, total: v.total, mlSellerIds: Array.from(v.mlSellerIds) }))
+    .map(([date, v]) => ({
+      date,
+      count: v.count,
+      total: v.total,
+      mlSellerIds: Array.from(v.mlSellerIds),
+      garantidoCount: v.garantidoCount,
+      garantidoTotal: v.garantidoTotal,
+    }))
     .sort((a, b) => a.date.localeCompare(b.date));
 
   return { days, semPrevisao: { count: semPrevisaoCount, total: semPrevisaoTotal } };

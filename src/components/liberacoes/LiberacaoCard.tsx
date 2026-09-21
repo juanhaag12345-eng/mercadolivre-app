@@ -1,10 +1,35 @@
-import { Wallet, Clock } from "lucide-react";
+import { Wallet, Clock, ShieldCheck, Truck, PackageX } from "lucide-react";
 import { Card, Badge } from "@/components/ui/Card";
 import { formatCurrency, formatDate, formatTime } from "@/lib/format";
 import type { LiberacaoRow } from "@/actions/liberacoes";
 
+// Traduz o status de envio (Mercado Envios) pra um selo simples de entender
+// — o que interessa aqui é só saber se a mercadoria já está garantida
+// (entregue) ou ainda em risco (a caminho / não entregue), não o
+// detalhamento técnico de cada status possível. Ver shippingStatus em
+// atualizarLiberacoes (actions/liberacoes.ts).
+function shippingStatusBadge(status: string | null) {
+  if (!status) return null;
+  if (status === "delivered") {
+    return { label: "Entregue · garantida", tone: "success" as const, Icon: ShieldCheck };
+  }
+  if (status === "not_delivered" || status === "cancelled") {
+    return {
+      label: status === "cancelled" ? "Envio cancelado" : "Entrega não concluída",
+      tone: "danger" as const,
+      Icon: PackageX,
+    };
+  }
+  if (status === "shipped") {
+    return { label: "A caminho do cliente", tone: "accent" as const, Icon: Truck };
+  }
+  // pending, handling, ready_to_ship, etc.
+  return { label: "Aguardando envio", tone: "warning" as const, Icon: Truck };
+}
+
 export function LiberacaoCard({ sale, accountLabel }: { sale: LiberacaoRow; accountLabel: string | null }) {
   const saleDateObj = new Date(sale.saleDate + "T00:00:00");
+  const shippingBadge = shippingStatusBadge(sale.shippingStatus);
 
   return (
     <Card className="space-y-3">
@@ -22,6 +47,12 @@ export function LiberacaoCard({ sale, accountLabel }: { sale: LiberacaoRow; acco
             <p className="text-xs text-muted mt-0.5">
               Cliente: <span className="font-medium text-foreground">{sale.buyerFullName ?? sale.buyerNickname}</span>
             </p>
+          )}
+          {shippingBadge && (
+            <Badge tone={shippingBadge.tone} className="mt-1.5 inline-flex items-center gap-1">
+              <shippingBadge.Icon size={11} />
+              {shippingBadge.label}
+            </Badge>
           )}
         </div>
         <span className="shrink-0 flex h-9 w-9 items-center justify-center rounded-lg bg-accent-soft text-accent">

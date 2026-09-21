@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
+import { ChevronLeft, ChevronRight, CalendarDays, ShieldCheck } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { formatCurrency, todayISO } from "@/lib/format";
@@ -48,6 +48,8 @@ export function CalendarioLiberacoes({
 
   const monthTotal = dates.reduce((sum, d) => sum + (byDate.get(d)?.total ?? 0), 0);
   const monthCount = dates.reduce((sum, d) => sum + (byDate.get(d)?.count ?? 0), 0);
+  const monthGarantidoTotal = dates.reduce((sum, d) => sum + (byDate.get(d)?.garantidoTotal ?? 0), 0);
+  const monthGarantidoCount = dates.reduce((sum, d) => sum + (byDate.get(d)?.garantidoCount ?? 0), 0);
 
   return (
     <Card className="mb-6">
@@ -61,6 +63,12 @@ export function CalendarioLiberacoes({
             <p className="text-xs text-muted">
               {monthCount > 0 ? `${monthCount} liberação(ões) · ${formatCurrency(monthTotal)}` : "Nenhuma liberação prevista nesse mês"}
             </p>
+            {monthGarantidoCount > 0 && (
+              <p className="text-[11px] text-accent flex items-center gap-1 mt-0.5">
+                <ShieldCheck size={11} />
+                {monthGarantidoCount} já entregue(s) ao cliente · {formatCurrency(monthGarantidoTotal)} garantido(s)
+              </p>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -111,7 +119,18 @@ export function CalendarioLiberacoes({
                   <span className="text-[10px] font-semibold text-success leading-tight text-center">
                     {formatCurrency(day.total)}
                   </span>
-                  <span className="text-[9px] text-success/80">{day.count}x</span>
+                  <span className="text-[9px] text-success/80 flex items-center gap-0.5">
+                    {day.count}x
+                    {day.garantidoCount > 0 && (
+                      <span
+                        className="flex items-center gap-0.5 text-accent"
+                        title={`${day.garantidoCount} de ${day.count} já entregue(s) ao cliente`}
+                      >
+                        <ShieldCheck size={9} />
+                        {day.garantidoCount}
+                      </span>
+                    )}
+                  </span>
                 </>
               )}
             </div>
@@ -130,6 +149,13 @@ export function CalendarioLiberacoes({
             </span>
           ))}
         </div>
+      )}
+
+      {monthGarantidoCount > 0 && (
+        <p className="flex items-center gap-1 text-[11px] text-muted mt-2">
+          <ShieldCheck size={11} className="text-accent" /> = mercadoria já entregue ao cliente (menor risco de
+          cancelamento/estorno), mesmo que o dinheiro ainda não tenha caído na conta.
+        </p>
       )}
 
       {data.semPrevisao.count > 0 && (
