@@ -435,6 +435,18 @@ export const sales = pgTable(
     // só para diagnóstico (saber se uma venda ficou "esquecida" sem nunca
     // ter sido verificada).
     moneyReleaseCheckedAt: timestamp("money_release_checked_at", { withTimezone: true }),
+    // Quando o netAmount dessa venda já liberada foi somado ao saldo
+    // estimado da Mercado Pago (ver syncAccountBalance em
+    // actions/mercadopago-balance.ts) — null até isso acontecer. Existe
+    // porque moneyReleaseStatus só vira "released" quando alguém clica em
+    // "Atualizar liberações", o que pode acontecer dias depois da liberação
+    // real: sem esse marcador, uma venda liberada só descoberta tarde ficava
+    // fora da janela de datas do relatório de liquidação da Mercado Pago já
+    // consultado, e o dinheiro dela sumia do saldo estimado pra sempre. Com
+    // o marcador, toda venda liberada com data de liberação depois do
+    // baseline da conta é somada assim que for descoberta, não importa o
+    // atraso.
+    moneyReleaseBalanceSyncedAt: timestamp("money_release_balance_synced_at", { withTimezone: true }),
 
     // --- Status de entrega do envio (Mercado Envios) — ver /liberacoes ---
     // Consultado em GET /shipments/$id (status: pending, handling,

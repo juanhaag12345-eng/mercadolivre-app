@@ -176,6 +176,13 @@
       "when": 1790027721589,
       "tag": "0024_odd_maverick",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1790034504742,
+      "tag": "0025_thick_frightful_four",
+      "breakpoints": true
     }
   ]
 }
