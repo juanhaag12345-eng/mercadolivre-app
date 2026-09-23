@@ -19,9 +19,12 @@ export interface ResolvedPeriod {
 
 /**
  * Resolve os parâmetros de busca do filtro do dashboard (?periodo=&de=&ate=)
- * em um intervalo de datas concreto. Se a pessoa preencheu "De"/"Até" sem
- * escolher um preset (ou escolheu "personalizado"), usa as datas informadas.
- * Sem nenhum filtro, cai no padrão de sempre: o mês atual.
+ * em um intervalo de datas concreto. Os campos "De"/"Até" do formulário são
+ * independentes do dropdown "Período" — dá pra editar as datas sem trocar o
+ * preset selecionado — então qualquer "De"/"Até" preenchido manualmente tem
+ * prioridade sobre o preset, mesmo que o dropdown ainda esteja marcado em
+ * "Este mês" ou outro preset (do contrário a data digitada é simplesmente
+ * ignorada). Sem nenhum filtro, cai no padrão de sempre: o mês atual.
  */
 export function resolveDashboardPeriod(params: {
   periodo?: string;
@@ -31,7 +34,7 @@ export function resolveDashboardPeriod(params: {
   const { periodo, de, ate } = params;
   const today = todayISO();
 
-  if (periodo === "personalizado" || (!periodo && (de || ate))) {
+  if (periodo === "personalizado" || de || ate) {
     return { periodo: "personalizado", from: de || undefined, to: ate || today };
   }
 
