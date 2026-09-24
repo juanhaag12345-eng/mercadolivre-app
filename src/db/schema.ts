@@ -661,6 +661,15 @@ export const adTitleMappings = pgTable(
     stockItemId: uuid("stock_item_id")
       .notNull()
       .references(() => stockItems.id, { onDelete: "cascade" }),
+    // Quantas unidades físicas do item de estoque saem por CADA unidade
+    // vendida desse anúncio — normalmente 1, mas alguns anúncios vendem um
+    // kit/combo com mais de uma unidade do mesmo item por unidade vendida
+    // (ex.: anúncio "Kit C/2 Nutella 650g" = 2 potes por unidade vendida,
+    // mesmo o Mercado Livre contando isso como "1" vendido). Usado só pra
+    // calcular o CUSTO total automaticamente (tryAutoConfirmPendingSale) —
+    // não multiplica a baixa de estoque, que continua sempre a quantidade
+    // do pedido (ver hint em PendingSaleCard).
+    unitsPerSale: integer("units_per_sale").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

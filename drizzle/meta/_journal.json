@@ -183,6 +183,13 @@
       "when": 1790034504742,
       "tag": "0025_thick_frightful_four",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1790203837491,
+      "tag": "0026_silky_solo",
+      "breakpoints": true
     }
   ]
 }

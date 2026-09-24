@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { Check, ChevronDown, ChevronRight, Link2, Loader2, Pencil, Trash2, X } from "lucide-react";
 import { Card } from "@/components/ui/Card";
-import { Select } from "@/components/ui/Field";
+import { IntegerInput, Select } from "@/components/ui/Field";
 import { deleteAdTitleMapping, updateAdTitleMapping, type AdTitleMappingRow } from "@/actions/mercadolivre";
 import type { StockItemRow } from "@/actions/stock";
 import { formatDate } from "@/lib/format";
@@ -62,6 +62,7 @@ export function AdTitleMappingsPanel({
 function MappingRow({ mapping, stockItems }: { mapping: AdTitleMappingRow; stockItems: StockItemRow[] }) {
   const [editing, setEditing] = useState(false);
   const [stockItemId, setStockItemId] = useState(mapping.stockItemId);
+  const [unitsPerSale, setUnitsPerSale] = useState(mapping.unitsPerSale);
   const [isSaving, startSaveTransition] = useTransition();
   const [isDeleting, startDeleteTransition] = useTransition();
 
@@ -71,6 +72,9 @@ function MappingRow({ mapping, stockItems }: { mapping: AdTitleMappingRow; stock
         <p className="text-sm font-medium truncate">{mapping.adTitle}</p>
         <p className="text-xs text-muted mt-0.5">
           → <span className="font-medium text-foreground">#{mapping.stockItemInternalCode} {mapping.stockItemName}</span>
+          {mapping.unitsPerSale > 1 && (
+            <span> · {mapping.unitsPerSale} unidades por venda (kit)</span>
+          )}
           {" · atualizado "}
           {formatDate(mapping.updatedAt)}
         </p>
@@ -86,13 +90,16 @@ function MappingRow({ mapping, stockItems }: { mapping: AdTitleMappingRow; stock
               ))}
             </Select>
           </div>
+          <div className="w-20" title="Unidades do produto por venda (kit)">
+            <IntegerInput min={1} value={unitsPerSale} onValueChange={setUnitsPerSale} />
+          </div>
           <button
             type="button"
             title="Salvar"
             disabled={isSaving}
             onClick={() =>
               startSaveTransition(async () => {
-                await updateAdTitleMapping(mapping.id, stockItemId);
+                await updateAdTitleMapping(mapping.id, stockItemId, unitsPerSale);
                 setEditing(false);
               })
             }
@@ -105,6 +112,7 @@ function MappingRow({ mapping, stockItems }: { mapping: AdTitleMappingRow; stock
             title="Cancelar"
             onClick={() => {
               setStockItemId(mapping.stockItemId);
+              setUnitsPerSale(mapping.unitsPerSale);
               setEditing(false);
             }}
             className="flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-surface-muted transition-colors"

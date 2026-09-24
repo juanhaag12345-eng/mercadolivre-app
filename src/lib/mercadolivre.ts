@@ -506,7 +506,7 @@ async function tryAutoConfirmPendingSale(mlOrderId: string, mlOrderItemId: strin
   if (!pending || pending.status !== "pendente") return;
 
   const [mapping] = await db
-    .select({ stockItemId: adTitleMappings.stockItemId })
+    .select({ stockItemId: adTitleMappings.stockItemId, unitsPerSale: adTitleMappings.unitsPerSale })
     .from(adTitleMappings)
     .where(eq(adTitleMappings.adTitle, pending.titleSnapshot))
     .limit(1);
@@ -521,6 +521,10 @@ async function tryAutoConfirmPendingSale(mlOrderId: string, mlOrderItemId: strin
   if (!item || item.referenceCostPrice === null) return;
 
   const unitCost = fromReferenceCostPrice(item.saleUnitType, item.unitsPerPackage, toNumber(item.referenceCostPrice));
+  // unitsPerSale cobre anúncios tipo "Kit C/2": o Mercado Livre conta 1
+  // unidade vendida, mas o custo real é de 2 unidades do item de estoque —
+  // ver ad_title_mappings.unitsPerSale.
+  const totalUnits = pending.quantity * mapping.unitsPerSale;
 
   await createSaleFromPendingSale({
     pending,
@@ -528,7 +532,7 @@ async function tryAutoConfirmPendingSale(mlOrderId: string, mlOrderItemId: strin
     quantity: pending.quantity,
     saleDate: toSaoPauloDateISO(pending.orderDate),
     dispatchedBy: "juan",
-    productCostManual: unitCost * pending.quantity,
+    productCostManual: unitCost * totalUnits,
     autoConfirmed: true,
     dispatchedByConfirmed: false,
   });

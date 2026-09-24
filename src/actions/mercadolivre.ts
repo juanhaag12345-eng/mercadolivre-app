@@ -200,10 +200,10 @@ export async function confirmPendingSale(
   // vínculo por adivinhação, só quando uma pessoa confirma manualmente.
   await db
     .insert(adTitleMappings)
-    .values({ adTitle: pending.titleSnapshot, stockItemId: resolvedStockItemId })
+    .values({ adTitle: pending.titleSnapshot, stockItemId: resolvedStockItemId, unitsPerSale: values.unitsPerSale })
     .onConflictDoUpdate({
       target: adTitleMappings.adTitle,
-      set: { stockItemId: resolvedStockItemId, updatedAt: new Date() },
+      set: { stockItemId: resolvedStockItemId, unitsPerSale: values.unitsPerSale, updatedAt: new Date() },
     });
 
   revalidatePath("/pendentes");
@@ -276,6 +276,7 @@ export interface AdTitleMappingRow {
   stockItemId: string;
   stockItemName: string;
   stockItemInternalCode: number;
+  unitsPerSale: number;
   updatedAt: Date;
 }
 
@@ -288,6 +289,7 @@ export async function listAdTitleMappings(): Promise<AdTitleMappingRow[]> {
       stockItemId: adTitleMappings.stockItemId,
       stockItemName: stockItems.name,
       stockItemInternalCode: stockItems.internalCode,
+      unitsPerSale: adTitleMappings.unitsPerSale,
       updatedAt: adTitleMappings.updatedAt,
     })
     .from(adTitleMappings)
@@ -295,9 +297,17 @@ export async function listAdTitleMappings(): Promise<AdTitleMappingRow[]> {
     .orderBy(desc(adTitleMappings.updatedAt));
 }
 
-/** Corrige manualmente pra qual produto um anúncio aponta — não mexe em vendas já confirmadas com o vínculo antigo, só nas próximas. */
-export async function updateAdTitleMapping(id: string, stockItemId: string) {
-  await db.update(adTitleMappings).set({ stockItemId, updatedAt: new Date() }).where(eq(adTitleMappings.id, id));
+/**
+ * Corrige manualmente pra qual produto um anúncio aponta e/ou quantas
+ * unidades físicas ele representa por unidade vendida (ver
+ * ad_title_mappings.unitsPerSale) — não mexe em vendas já confirmadas com o
+ * vínculo antigo, só nas próximas.
+ */
+export async function updateAdTitleMapping(id: string, stockItemId: string, unitsPerSale: number) {
+  await db
+    .update(adTitleMappings)
+    .set({ stockItemId, unitsPerSale, updatedAt: new Date() })
+    .where(eq(adTitleMappings.id, id));
   revalidatePath("/pendentes");
 }
 

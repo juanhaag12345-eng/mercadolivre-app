@@ -11,6 +11,7 @@ import { NOVO_PRODUTO_SENTINEL } from "@/lib/stock-matching";
 import type { StockItemRow } from "@/actions/stock";
 import { formatCurrency, formatDate, formatPercent, formatTime } from "@/lib/format";
 import { toSaoPauloDateISO } from "@/lib/dates";
+import { fromReferenceCostPrice } from "@/lib/product-pricing";
 import { DISPATCHER_LABELS, DISPATCHERS, type PendingSale } from "@/db/schema";
 import type { ActionResult } from "@/actions/products";
 
@@ -29,12 +30,32 @@ export function PendingSaleCard({
   const [productCost, setProductCost] = useState(0);
   const [stockItemId, setStockItemId] = useState("");
   const [newStockItemName, setNewStockItemName] = useState("");
+  // Quantas unidades físicas do produto o anúncio representa por unidade
+  // vendida — ex.: título "Kit C/2 ..." = 2 potes por unidade vendida, mesmo
+  // o Mercado Livre contando isso como "1" vendido. Confira sempre o título
+  // (e a descrição, se o título não deixar claro) antes de confirmar: é
+  // esse número, memorizado no vínculo anúncio→produto, que faz as PRÓXIMAS
+  // vendas do mesmo anúncio entrarem sozinhas com o custo certo.
+  const [unitsPerSale, setUnitsPerSale] = useState(1);
   const [ignoring, startIgnoreTransition] = useTransition();
 
   const selectedStockItem = useMemo(
     () => stockItems.find((item) => item.id === stockItemId) ?? null,
     [stockItems, stockItemId]
   );
+
+  // Sugestão de custo total (referência × quantidade × unidades por venda)
+  // pra ajudar a preencher "Custo do produto" sem precisar fazer a conta de
+  // cabeça — só um ponto de partida, o campo continua livre pra editar.
+  const suggestedCost = selectedStockItem
+    ? fromReferenceCostPrice(
+        selectedStockItem.saleUnitType,
+        selectedStockItem.unitsPerPackage,
+        selectedStockItem.referenceCostPrice
+      ) *
+      quantity *
+      unitsPerSale
+    : null;
 
   const orderDateObj = new Date(pending.orderDate);
   const unitPrice = Number(pending.unitPriceSnapshot);
@@ -109,6 +130,19 @@ export function PendingSaleCard({
         </div>
 
         <div>
+          <Label hint="ex.: título 'Kit C/2' = 2 — veja o título/descrição do anúncio">
+            Unidades do produto por venda (kit)
+          </Label>
+          <IntegerInput
+            name="unitsPerSale"
+            min={1}
+            value={unitsPerSale}
+            onValueChange={setUnitsPerSale}
+            error={errors.unitsPerSale}
+          />
+        </div>
+
+        <div>
           <div className="flex items-baseline justify-between mb-1.5">
             <Label>Produto (estoque)</Label>
             {selectedStockItem && (
@@ -162,6 +196,15 @@ export function PendingSaleCard({
             onValueChange={setProductCost}
             error={errors.productCostManual}
           />
+          {suggestedCost !== null && suggestedCost > 0 && (
+            <button
+              type="button"
+              onClick={() => setProductCost(suggestedCost)}
+              className="mt-1 text-xs text-accent hover:underline"
+            >
+              usar sugestão: {formatCurrency(suggestedCost)} (custo de referência × {quantity} × {unitsPerSale} unid.)
+            </button>
+          )}
         </div>
 
         <input type="hidden" name="saleDate" value={toSaoPauloDateISO(orderDateObj)} />

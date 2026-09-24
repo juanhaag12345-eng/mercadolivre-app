@@ -1,0 +1,1 @@
+ALTER TABLE "ad_title_mappings" ADD COLUMN "units_per_sale" integer DEFAULT 1 NOT NULL;

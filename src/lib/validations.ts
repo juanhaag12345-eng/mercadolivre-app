@@ -62,6 +62,11 @@ export const confirmPendingSaleSchema = z.object({
   // Só preenchido quando stockItemId é o sentinela "criar novo": nome do
   // item de estoque a cadastrar na hora, sem sair da tela de Pendentes.
   newStockItemName: z.string().trim().optional(),
+  // Quantas unidades físicas do produto o anúncio representa por unidade
+  // vendida (ex.: anúncio "Kit C/2" = 2) — memorizado no vínculo
+  // anúncio→produto pra calcular sozinho o custo certo nas próximas vendas
+  // do mesmo anúncio (ver ad_title_mappings.unitsPerSale).
+  unitsPerSale: z.coerce.number().int().min(1, "Mínimo 1").default(1),
 });
 
 // Cadastro/edição de um item de estoque (aba Produtos).
