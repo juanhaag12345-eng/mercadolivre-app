@@ -1,7 +1,8 @@
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Coins } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { getStockAnalytics, listStockItemsWithStock } from "@/actions/stock";
 import { StockItemsList } from "@/components/compras/StockItemsList";
+import { formatCurrency } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,18 @@ export default async function CadastroProdutosPage() {
 
   const lowStockItems = items.filter((item) => item.active && item.lowStock);
 
+  // Valor total parado em estoque: soma, entre os itens ativos, de estoque
+  // atual × custo de referência por unidade. Itens sem custo de referência
+  // cadastrado ainda não entram na conta — sinalizado abaixo do total pra
+  // não passar a impressão de que o valor mostrado já é o valor real
+  // completo quando falta preço de custo em algum item.
+  const activeItems = items.filter((item) => item.active);
+  const itemsMissingCost = activeItems.filter((item) => item.referenceCostPrice === null && item.currentStock > 0);
+  const totalStockValue = activeItems.reduce(
+    (sum, item) => sum + item.currentStock * (item.referenceCostPrice ?? 0),
+    0
+  );
+
   return (
     <div className="p-4 md:p-8 max-w-5xl mx-auto animate-in">
       <div className="mb-6">
@@ -25,6 +38,21 @@ export default async function CadastroProdutosPage() {
           vendas do Mercado Livre confirmadas em Pendentes.
         </p>
       </div>
+
+      <Card className="mb-6 flex items-start gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-success-soft text-success">
+          <Coins size={16} />
+        </span>
+        <div>
+          <p className="text-xs text-muted">Valor total em estoque</p>
+          <p className="text-2xl font-bold">{formatCurrency(totalStockValue)}</p>
+          <p className="text-[11px] text-muted mt-0.5">
+            Estoque atual × custo de referência de cada item ativo.
+            {itemsMissingCost.length > 0 &&
+              ` ${itemsMissingCost.length} item${itemsMissingCost.length === 1 ? "" : "s"} com estoque mas sem custo de referência cadastrado ainda não ${itemsMissingCost.length === 1 ? "entra" : "entram"} nessa conta.`}
+          </p>
+        </div>
+      </Card>
 
       {lowStockItems.length > 0 && (
         <Card className="mb-6 border-danger/30 bg-danger-soft/40">
