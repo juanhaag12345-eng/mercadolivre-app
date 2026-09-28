@@ -1,32 +1,17 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq, isNull, ne, or } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { mercadopagoBalances, sales } from "@/db/schema";
 import { withFinancials, type SaleWithFinancials } from "@/lib/sale-financials";
-import {
-  getValidAccessTokenForAccount,
-  fetchPaymentReleaseInfo,
-  fetchShippingStatusInfo,
-  SHIPPING_STATUS_TERMINAL,
-} from "@/lib/mercadolivre";
+import { notReleasedCondition, runAtualizarLiberacoes } from "@/lib/liberacoes-sync";
 import { toNumber, isGarantida } from "@/lib/calculations";
 import { toSaoPauloDateISO } from "@/lib/dates";
 import { todayISO } from "@/lib/format";
 import { listPurchases } from "@/actions/stock";
 
 export type LiberacaoRow = SaleWithFinancials & { netAmount: number };
-
-// Considera "pendente de liberação" toda venda do Mercado Livre cujo status
-// de liberação ainda não é "released" (inclui nunca verificadas, onde o
-// status fica null).
-function notReleasedCondition() {
-  return and(
-    eq(sales.source, "mercadolivre"),
-    or(isNull(sales.moneyReleaseStatus), ne(sales.moneyReleaseStatus, "released"))
-  );
-}
 
 /**
  * Valor líquido estimado que efetivamente cai na conta do vendedor: receita
@@ -65,115 +50,20 @@ export async function getPendingReleaseSummary(mlSellerId?: string): Promise<{ c
 
 /**
  * Consulta a data/status de liberação de todas as vendas ainda não marcadas
- * como liberadas (via GET /v1/payments/$id, por mlPaymentId — não é possível
- * consultar em lote por order_id, ver fetchPaymentReleaseInfo) e atualiza o
- * banco. Agrupa por conta vendedora (mlSellerId) porque o access_token é por
- * conta. Vendas sem mlSellerId e/ou mlPaymentId identificados (confirmadas
- * antes dessas colunas existirem) são ignoradas — não tem como saber de qual
- * conta usar o token, ou qual pagamento consultar.
- *
- * De quebra, aproveita a mesma passada pra também consultar o status do
- * envio (ver fetchShippingStatusInfo) de quem ainda não tem um status
- * "final" salvo (delivered/not_delivered/cancelled não mudam mais, então não
- * precisam ser consultados de novo) — é o que alimenta a marca de "garantida"
- * em /liberacoes (mercadoria já entregue ao cliente).
+ * como liberadas e o status de envio de quem ainda não tem um status final
+ * (ver runAtualizarLiberacoes, em lib/liberacoes-sync.ts, onde mora a lógica
+ * de verdade) e atualiza o banco. Essa Server Action é só o que o botão
+ * "Atualizar liberações" em /liberacoes chama — ela existe separada da
+ * lógica porque só quem roda dentro de uma requisição pode chamar
+ * revalidatePath. O mesmo trabalho também roda sozinho a cada poucas horas
+ * (ver instrumentation.ts), então esse botão serve pra forçar uma checagem
+ * na hora, não é mais a única forma de atualizar.
  */
 export async function atualizarLiberacoes(): Promise<{ ok: boolean; message: string }> {
-  const rows = await db.select().from(sales).where(notReleasedCondition());
-
-  const withPaymentAndSeller = rows.filter(
-    (row): row is typeof row & { mlPaymentId: string; mlSellerId: string } =>
-      Boolean(row.mlPaymentId) && Boolean(row.mlSellerId)
-  );
-  const skippedIncomplete = rows.length - withPaymentAndSeller.length;
-
-  if (withPaymentAndSeller.length === 0) {
-    return {
-      ok: true,
-      message:
-        skippedIncomplete > 0
-          ? `Nenhuma venda pôde ser verificada: ${skippedIncomplete} venda(s) pendente(s) sem conta e/ou pagamento identificado.`
-          : "Nenhuma venda pendente de liberação para atualizar.",
-    };
-  }
-
-  const bySeller = new Map<string, typeof withPaymentAndSeller>();
-  for (const row of withPaymentAndSeller) {
-    const list = bySeller.get(row.mlSellerId) ?? [];
-    list.push(row);
-    bySeller.set(row.mlSellerId, list);
-  }
-
-  let updated = 0;
-  let released = 0;
-  let shippingUpdated = 0;
-  let delivered = 0;
-  const errors: string[] = [];
-
-  for (const [sellerId, sellerRows] of bySeller) {
-    try {
-      const accessToken = await getValidAccessTokenForAccount(sellerId);
-      const paymentIds = Array.from(new Set(sellerRows.map((r) => r.mlPaymentId)));
-      const info = await fetchPaymentReleaseInfo(paymentIds, accessToken);
-
-      for (const row of sellerRows) {
-        const releaseInfo = info.get(row.mlPaymentId);
-        if (!releaseInfo) continue;
-        await db
-          .update(sales)
-          .set({
-            moneyReleaseDate: releaseInfo.moneyReleaseDate,
-            moneyReleaseStatus: releaseInfo.moneyReleaseStatus,
-            moneyReleaseCheckedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(sales.id, row.id));
-        updated += 1;
-        if (releaseInfo.moneyReleaseStatus === "released") released += 1;
-      }
-
-      // Status de envio: só consulta de novo quem ainda não chegou a um
-      // status final, e só quem tem o pedido identificado (mlOrderId).
-      const needsShippingCheck = sellerRows.filter(
-        (row): row is typeof row & { mlOrderId: string } =>
-          Boolean(row.mlOrderId) &&
-          !SHIPPING_STATUS_TERMINAL.includes(row.shippingStatus as (typeof SHIPPING_STATUS_TERMINAL)[number])
-      );
-      if (needsShippingCheck.length > 0) {
-        const orderIds = Array.from(new Set(needsShippingCheck.map((r) => r.mlOrderId)));
-        const shippingInfo = await fetchShippingStatusInfo(orderIds, accessToken);
-
-        for (const row of needsShippingCheck) {
-          const status = shippingInfo.get(row.mlOrderId);
-          if (!status || status === row.shippingStatus) continue;
-          await db
-            .update(sales)
-            .set({ shippingStatus: status, shippingStatusCheckedAt: new Date(), updatedAt: new Date() })
-            .where(eq(sales.id, row.id));
-          shippingUpdated += 1;
-          if (status === "delivered") delivered += 1;
-        }
-      }
-    } catch (err) {
-      errors.push(err instanceof Error ? err.message : "erro desconhecido");
-    }
-  }
-
+  const result = await runAtualizarLiberacoes();
   revalidatePath("/liberacoes");
   revalidatePath("/");
-
-  const skippedNote = skippedIncomplete > 0 ? ` (${skippedIncomplete} sem conta/pagamento identificado, ignorada(s))` : "";
-  const shippingNote = shippingUpdated > 0 ? ` ${delivered} entrega(s) confirmada(s) agora.` : "";
-  if (errors.length > 0) {
-    return {
-      ok: updated > 0,
-      message: `${updated} venda(s) verificada(s), ${released} já liberada(s)${skippedNote}.${shippingNote} Erros: ${errors.join("; ")}`,
-    };
-  }
-  return {
-    ok: true,
-    message: `${updated} venda(s) verificada(s), ${released} já liberada(s)${skippedNote}.${shippingNote}`,
-  };
+  return { ok: result.ok, message: result.message };
 }
 
 // --- Calendário de liberações (topo da tela /liberacoes) ---

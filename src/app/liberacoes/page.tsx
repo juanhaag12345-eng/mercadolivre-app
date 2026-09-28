@@ -56,8 +56,8 @@ export default async function LiberacoesPage(props: PageProps<"/liberacoes">) {
         <div>
           <h1 className="text-2xl font-bold">Liberações pendentes</h1>
           <p className="text-sm text-muted mt-0.5">
-            Vendas do Mercado Livre cujo dinheiro ainda não caiu na conta — atualize para consultar a previsão de
-            liberação de cada uma.
+            Vendas do Mercado Livre cujo dinheiro ainda não caiu na conta — a previsão de liberação de cada uma é
+            atualizada sozinha a cada poucas horas; use o botão para forçar uma checagem na hora.
           </p>
         </div>
         <AtualizarLiberacoesButton />
